@@ -719,6 +719,7 @@ function rankMood(spec){
   const fm=(spec.formats||[]).filter(f=>TY.includes(f));
   const maxE=+spec.maxEpisodes||0, y0=+spec.minYear||0, y1=+spec.maxYear||0, qMin=+spec.minScore||0, pop=spec.pop||"";
   const named=new Map();(spec.titles||[]).forEach((t,k)=>{const a=resolveTitle(t);if(a&&!named.has(a.i))named.set(a.i,1-k*0.03);});
+  const hint=new Set();(spec.hints||[]).forEach(t=>{const a=resolveTitle(t);if(a)hint.add(a.i);});
   const seen=new Set(state.seen), wantSet=new Set(want), kidsOk=gWant.includes("Kids");
   const out=[];
   for(const a of DATA){
@@ -740,9 +741,10 @@ function rankMood(spec){
     let s=0;
     for(const k of a.tg) if(wantSet.has(k)) s+=TG_W[k];
     for(const g of gWant) if(a.g.includes(g)) s+=1.2;
-    if(s<=0&&!nm&&!(qMin||pop)) continue;
+    const hb=hint.has(a.i)?1:0;
+    if(s<=0&&!nm&&!hb&&!(qMin||pop)) continue;
     const q=a.s>0?Math.min(1,Math.max(0,(a.s-6)/3)):0.25;
-    s=s*(0.55+0.45*q)+Math.log10(1+a.m)*(pop==="popular"?1.4:pop==="gems"?0:0.35)+nm*12+(spec.notMid&&a.s>=7.8?1.5:0);
+    s=s*(0.55+0.45*q)+Math.log10(1+a.m)*(pop==="popular"?1.4:pop==="gems"?0:0.35)+nm*12+hb*5+(spec.notMid&&a.s>=7.8?1.5:0);
     out.push({a,s});
   }
   out.sort((x,y)=>y.s-x.s);
@@ -784,7 +786,7 @@ const GENRE_WORDS={gore:"Gore",gory:"Gore",ecchi:"Ecchi",harem:"Harem",action:"A
    k: key matched as a word or phrase. tags/genres widen the match; q sets a score floor;
    pop "gems"|"popular" steers popularity; len sets max episodes; why is shown to the viewer. */
 const SLANG=[
- {k:["peak","peak fiction","absolute cinema","cinema","goated","goat","masterpiece","banger","fire","10/10","top tier","s tier","god tier","elite","no skips","hits different"],q:8.2,why:"top-rated"},
+ {k:["peak","peak fiction","absolute cinema","cinema","goated","goat","masterpiece","banger","fire","10/10","top tier","s tier","god tier","no skips","hits different"],q:8.2,why:"top-rated"},
  {k:["not mid","actually good","solid"],q:7.6,why:"well-rated"},
  {k:["mid","mediocre","decent","whatever"],mid:true,why:"average-rated"},
  {k:["underrated","hidden gem","hidden gems","obscure","slept on","nobody talks about","niche","deep cut","deep cuts"],pop:"gems",why:"under the radar"},
@@ -814,6 +816,10 @@ const SLANG=[
  {k:["binge","bingeable","one sitting","in one night","quick watch"],len:13,why:"bingeable"},
  {k:["no fanservice","no fan service","no ecchi"],avoid:["ecchi"],avoidGenres:["Ecchi","Harem"],why:"no fanservice"},
  {k:["no romance","no simping"],avoidGenres:["Romance"],why:"no romance"},
+ {k:["larp","larping","larper","larps"],tags:["chuunibyou","secret identity"],titles:["The Eminence in Shadow","Chuunibyou demo Koi ga Shitai!","Classroom of the Elite","Spy x Family"],why:"main characters playing a role"},
+ {k:["elite ball knowledge","ball knowledge","ebk","real ones know","if you know you know","iykyk"],pop:"gems",q:7.8,why:"deep cuts for real fans"},
+ {k:["sub5","sub 5","sub-5","sub3","sub 3","ltn","low tier normie"],tags:["hikikomori","otaku","bullying","social commentary"],titles:["NHK ni Youkoso!","Watashi ga Motenai no wa Dou Kangaetemo Omaera ga Warui!","Ore Monogatari!!","Yahari Ore no Seishun Love Comedy wa Machigatteiru.","Bocchi the Rock!"],why:"outcast underdog MCs"},
+ {k:["black pill","blackpill","blackpilled","bp","doomer","doompilled","no cope","nihilist","nihilistic"],tags:["angst","melancholy","rotten world","social commentary","trauma","psychological"],titles:["NHK ni Youkoso!","Aku no Hana","Kuzu no Honkai","Shinseiki Evangelion","Texhnolyze","Oyasumi Punpun"],why:"bleak, nihilistic stories"},
  {k:["😭","🥲","💔","😢"],tags:["tragedy","sentimental drama","melancholy"],why:"😭"},
  {k:["💀","😂","🤣"],genres:["Comedy"],tags:["gag humor","absurdist humour","dark comedy"],why:"💀"},
  {k:["🔥","🐐","💯"],q:8.0,why:"🔥"},
@@ -837,6 +843,7 @@ function applySlang(t,spec){
     if(e.avoidGenres) spec.avoidGenres.push(...e.avoidGenres);
     if(e.q) spec.minScore=Math.max(spec.minScore||0,e.q);
     if(e.pop) spec.pop=e.pop;
+    if(e.titles) spec.hints=[...(spec.hints||[]),...e.titles];
     if(e.len&&!spec.maxEpisodes) spec.maxEpisodes=e.len;
     if(e.why&&!hits.some(h=>h.why===e.why)) hits.push({k,why:e.why});
   }
@@ -926,10 +933,10 @@ TAG LIST: ${TG.join(", ")}`;
     }
   }
   if(!spec||typeof spec!=="object"){spec=localSpec(text);via="keywords";}
-  else{const loc={tags:[],genres:[],avoid:[],avoidGenres:[]};applySlang(" "+text.toLowerCase()+" ",loc);
+  else{const loc={tags:[],genres:[],avoid:[],avoidGenres:[],hints:[]};applySlang(" "+text.toLowerCase()+" ",loc);
     spec.tags=[...(spec.tags||[]),...loc.tags];spec.genres=[...(spec.genres||[]),...loc.genres];
     spec.avoid=[...(spec.avoid||[]),...loc.avoid];spec.avoidGenres=[...(spec.avoidGenres||[]),...loc.avoidGenres];
-    if(!spec.minScore&&loc.minScore)spec.minScore=loc.minScore;if(!spec.pop&&loc.pop)spec.pop=loc.pop;if(loc.notMid)spec.notMid=true;}
+    if(!spec.minScore&&loc.minScore)spec.minScore=loc.minScore;spec.hints=[...(spec.hints||[]),...(loc.hints||[])];if(!spec.pop&&loc.pop)spec.pop=loc.pop;if(loc.notMid)spec.notMid=true;}
   const hits=rankMood(spec);
   state.mood=hits.map(a=>a.i); persist(); renderChips();
   $("moodSum").textContent=hits.length?(spec.summary?String(spec.summary):"Picks for: "+text):"Nothing in the catalog matched that. Try describing it differently.";

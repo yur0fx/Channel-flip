@@ -688,7 +688,7 @@ function setMode(m){
   mode=m;
   $("mTitle").setAttribute("aria-selected",m==="title");$("mMood").setAttribute("aria-selected",m==="mood");
   const q=$("q");q.value="";$("results").hidden=true;$("moodPanel").hidden=true;
-  q.placeholder=m==="mood"?"e.g. cozy camping show, or: like Frieren but darker":"Search an anime to see what's like it…";
+  q.placeholder=m==="mood"?"e.g. peak fiction with aura farming mcs, or: unhinged comedy 💀":"Search an anime to see what's like it…";
   q.setAttribute("aria-label",m==="mood"?"Describe what you're in the mood for":"Search anime by English or Japanese title");
   $("askBtn").hidden=m!=="mood";q.focus();
 }
@@ -717,7 +717,7 @@ function rankMood(spec){
   const avoid=new Set((spec.avoid||[]).map(t=>TG.indexOf(String(t).toLowerCase())).filter(k=>k>=0));
   const gWant=(spec.genres||[]).filter(g=>V.includes(g)), gAvoid=(spec.avoidGenres||[]).filter(g=>V.includes(g));
   const fm=(spec.formats||[]).filter(f=>TY.includes(f));
-  const maxE=+spec.maxEpisodes||0, y0=+spec.minYear||0, y1=+spec.maxYear||0;
+  const maxE=+spec.maxEpisodes||0, y0=+spec.minYear||0, y1=+spec.maxYear||0, qMin=+spec.minScore||0, pop=spec.pop||"";
   const named=new Map();(spec.titles||[]).forEach((t,k)=>{const a=resolveTitle(t);if(a&&!named.has(a.i))named.set(a.i,1-k*0.03);});
   const seen=new Set(state.seen), wantSet=new Set(want), kidsOk=gWant.includes("Kids");
   const out=[];
@@ -729,16 +729,20 @@ function rankMood(spec){
     if(!fm.length&&!["TV","Movie","ONA","OVA"].includes(a.ty)) continue;
     if(maxE&&a.ty!=="Movie"&&(!a.ep||a.ep>maxE)) continue;
     if(y0&&a.y&&a.y<y0) continue; if(y1&&a.y&&a.y>y1) continue;
+    if(qMin&&!nm&&!(a.s>=qMin)) continue;
+    if(spec.midRange&&!nm&&!(a.s>=6.4&&a.s<7.5)) continue;
+    if(pop==="gems"&&!nm&&!(a.m>3000&&a.m<150000)) continue;
     if(!kidsOk&&a.g.includes("Kids")) continue;
     if(gAvoid.some(g=>a.g.includes(g))) continue;
+    if(spec.must&&!nm&&!spec.must.every(g=>a.g.includes(g))) continue;
     if(a.tg.some(k=>avoid.has(k))) continue;
     if(state.hideSeen&&seen.has(a.i)) continue;
     let s=0;
     for(const k of a.tg) if(wantSet.has(k)) s+=TG_W[k];
     for(const g of gWant) if(a.g.includes(g)) s+=1.2;
-    if(s<=0&&!nm) continue;
+    if(s<=0&&!nm&&!(qMin||pop)) continue;
     const q=a.s>0?Math.min(1,Math.max(0,(a.s-6)/3)):0.25;
-    s=s*(0.55+0.45*q)+Math.log10(1+a.m)*0.35+nm*12;
+    s=s*(0.55+0.45*q)+Math.log10(1+a.m)*(pop==="popular"?1.4:pop==="gems"?0:0.35)+nm*12+(spec.notMid&&a.s>=7.8?1.5:0);
     out.push({a,s});
   }
   out.sort((x,y)=>y.s-x.s);
@@ -776,6 +780,70 @@ const SYN={
  "coming of age":["coming of age"],"plot twist":["plot twists"],"slice of life":["slice of life comedy","iyashikei","daily life"]
 };
 const GENRE_WORDS={gore:"Gore",gory:"Gore",ecchi:"Ecchi",harem:"Harem",action:"Action",adventure:"Adventure",comedy:"Comedy",funny:"Comedy",drama:"Drama",romance:"Romance",romantic:"Romance",fantasy:"Fantasy",scifi:"Sci-Fi","sci-fi":"Sci-Fi",mystery:"Mystery",psychological:"Psychological",horror:"Horror",scary:"Horror",supernatural:"Supernatural",sports:"Sports",music:"Music",isekai:"Isekai",mecha:"Mecha",historical:"Historical",gourmet:"Gourmet",food:"Gourmet",cozy:"Iyashikei",iyashikei:"Iyashikei",space:"Space",thriller:"Suspense",suspense:"Suspense"};
+/* internet & anime slang → tags, genres and quality/popularity signals.
+   k: key matched as a word or phrase. tags/genres widen the match; q sets a score floor;
+   pop "gems"|"popular" steers popularity; len sets max episodes; why is shown to the viewer. */
+const SLANG=[
+ {k:["peak","peak fiction","absolute cinema","cinema","goated","goat","masterpiece","banger","fire","10/10","top tier","s tier","god tier","elite","no skips","hits different"],q:8.2,why:"top-rated"},
+ {k:["not mid","actually good","solid"],q:7.6,why:"well-rated"},
+ {k:["mid","mediocre","decent","whatever"],mid:true,why:"average-rated"},
+ {k:["underrated","hidden gem","hidden gems","obscure","slept on","nobody talks about","niche","deep cut","deep cuts"],pop:"gems",why:"under the radar"},
+ {k:["mainstream","popular","everyone watched","everyone's watching","big three","starter","beginner","first anime","gateway anime","normie"],pop:"popular",why:"well-known"},
+ {k:["aura","aura farming","aura farm","mog","mogging","sigma","chad","gigachad","badass","goes hard","menace","cool mc","cool protagonist","stoic"],tags:["hero of strong character","strong male lead","stoic hero","overpowered main characters","genius"],why:"high-aura leads"},
+ {k:["op mc","broken mc","overpowered mc","op protagonist","one shot","solos","no diff"],tags:["overpowered main characters","nearly almighty protagonist","hero of strong character"],why:"overpowered MC"},
+ {k:["slay","girlboss","queen","she ate","baddie","female mc","girl mc"],tags:["strong female lead","heroine of strong character","stoic heroine"],why:"strong female lead"},
+ {k:["rizz","rizzler","unspoken rizz","simp","simping","crush","ship","otp","couple goals","down bad","yearning","kokoro"],genres:["Romance"],tags:["romantic comedy","romance","slow when it comes to love","unrequited love"],why:"romance"},
+ {k:["slow burn"],genres:["Romance"],tags:["slow when it comes to love","slow-paced","romantic drama"],why:"slow-burn romance"},
+ {k:["enemies to lovers","rivals to lovers"],genres:["Romance"],tags:["rivalry","romantic comedy","tsundere"],why:"rivals to lovers"},
+ {k:["waifu","best girl"],tags:["heroine of strong character","moe","romantic comedy"],why:"memorable heroines"},
+ {k:["husbando","best boy"],tags:["strong male lead","stoic hero","reverse harem"],why:"memorable leads"},
+ {k:["yandere"],tags:["yandere","psychological"],why:"yandere"},{k:["tsundere"],tags:["tsundere"],why:"tsundere"},{k:["kuudere"],tags:["kuudere"],why:"kuudere"},
+ {k:["brainrot","brain rot","unhinged","chaotic","goofy","goofy ahh","silly goofy","skibidi","deranged","no thoughts","shitpost","shitposting","crackhead"],genres:["Comedy"],tags:["gag humor","absurdist humour","absurdity","surreal comedy","nonsense-comedy","parody"],why:"unhinged comedy"},
+ {k:["wholesome","wholesome 100","precious","smol","uwu","soft","comfort show","comfort anime","comfort watch","comfy","cozy core","cottagecore","vibes","chill vibes","lofi","lo-fi","touch grass","healing"],genres:["Slice of Life"],tags:["iyashikei","heart-warming","slice of life comedy","countryside","found family"],why:"comfort watch"},
+ {k:["pain","emotional damage","sadboi","sad boi","emo","angsty","crying in the club","in shambles","devastated","depressed","depressing","heartbreak","heartbreaking","ugly cry","tearjerker"],tags:["tragedy","angst","melancholy","death of a loved one","sentimental drama","trauma"],why:"emotional damage"},
+ {k:["edgy","edgelord","grimdark","dark af","messed up","fucked up","twisted","disturbing","psycho"],tags:["dark fantasy","rotten world","twisted story","psychological","anti-hero","trauma"],why:"dark and twisted"},
+ {k:["mindfuck","mind fuck","mind blown","mindblowing","big brain","galaxy brain","200 iq","5head","4d chess","outplayed","plot armor"],genres:["Psychological"],tags:["plot twists","twisted story","genius","psychological","strategy game","brain games and gambling"],why:"big-brain plots"},
+ {k:["hype","hype af","goosebumps","sakuga","fights go crazy","crazy fights","animation goes hard","insane animation","banger fights","action packed"],genres:["Action"],q:7.4,tags:["fighting-shounen","hero of strong character","martial arts","swordplay","tournament","calling your attacks"],why:"hype fights"},
+ {k:["villain arc","villain era","morally grey","morally gray","anti hero","antihero"],tags:["anti-hero","antihero","revenge","redemption","rotten world"],why:"anti-heroes"},
+ {k:["underdog","glow up","grindset","grind","hard work","no talent"],tags:["hard work and guts","training","coming of age","rivalry"],why:"underdog grind"},
+ {k:["bros","bro","homies","brotherhood","squad","found family","besties","bffs"],tags:["friendship","found family","childhood friends"],why:"friendship"},
+ {k:["isekai trash","truck-kun","truck kun","another world"],genres:["Isekai"],tags:["isekai","reincarnation"],why:"isekai"},
+ {k:["dark academia"],tags:["school","psychological","mystery","genius"],genres:["Mystery"],why:"dark academia"},
+ {k:["main character energy","mc energy","protagonist energy"],tags:["hero of strong character","heroine of strong character","coming of age"],why:"main-character energy"},
+ {k:["existential","existential crisis","philosophical","makes you think"],tags:["philosophy","psychological","melancholy"],why:"makes you think"},
+ {k:["binge","bingeable","one sitting","in one night","quick watch"],len:13,why:"bingeable"},
+ {k:["no fanservice","no fan service","no ecchi"],avoid:["ecchi"],avoidGenres:["Ecchi","Harem"],why:"no fanservice"},
+ {k:["no romance","no simping"],avoidGenres:["Romance"],why:"no romance"},
+ {k:["😭","🥲","💔","😢"],tags:["tragedy","sentimental drama","melancholy"],why:"😭"},
+ {k:["💀","😂","🤣"],genres:["Comedy"],tags:["gag humor","absurdist humour","dark comedy"],why:"💀"},
+ {k:["🔥","🐐","💯"],q:8.0,why:"🔥"},
+ {k:["😳","💕","❤️","🥰","😍"],genres:["Romance"],tags:["romantic comedy","romance"],why:"romance"},
+ {k:["🗿","😎"],tags:["stoic hero","hero of strong character","overpowered main characters"],why:"🗿 energy"},
+ {k:["🧠"],tags:["genius","plot twists","psychological"],why:"🧠"},
+ {k:["🌸","☕","🍵","🏕️"],tags:["iyashikei","heart-warming","slice of life comedy"],why:"cozy"}
+];
+function applySlang(t,spec){
+  const hits=[];
+  const has=k=>/^[a-z0-9]/.test(k)?new RegExp("(^|[^a-z0-9])"+k.replace(/[.*+?^${}()|[\]\\/]/g,"\\$&")+"($|[^a-z0-9])").test(t):t.includes(k);
+  // "not mid" must win over "mid"
+  const notMid=/\bnot (?:even )?mid\b/.test(t); if(notMid) spec.notMid=true;
+  for(const e of SLANG){
+    const k=e.k.find(has); if(!k) continue;
+    if(k==="mid"&&notMid) continue;
+    if(e.mid){spec.midRange=true;}
+    if(e.tags) spec.tags.push(...e.tags);
+    if(e.genres) spec.genres.push(...e.genres);
+    if(e.avoid) spec.avoid.push(...e.avoid);
+    if(e.avoidGenres) spec.avoidGenres.push(...e.avoidGenres);
+    if(e.q) spec.minScore=Math.max(spec.minScore||0,e.q);
+    if(e.pop) spec.pop=e.pop;
+    if(e.len&&!spec.maxEpisodes) spec.maxEpisodes=e.len;
+    if(e.why&&!hits.some(h=>h.why===e.why)) hits.push({k,why:e.why});
+  }
+  spec.slang=hits;
+  return t;
+}
+const MUST_WORDS=new Set(["isekai","mecha","sports","horror","mystery","music","gourmet","sci-fi","scifi","fantasy","romance","historical","space","thriller","supernatural"]);
 function synTags(w){let v=SYN[w];let hop=0;while(typeof v==="string"&&hop++<3)v=SYN[v];return Array.isArray(v)?v:[];}
 function localSpec(text){
   let t=" "+text.toLowerCase().replace(/[’']/g,"'")+" ";
@@ -790,8 +858,9 @@ function localSpec(text){
       spec.tags.push(...a.tg.slice(0,12).map(k=>TG[k]));spec.genres.push(...a.g.filter(g=>!["Shounen","Seinen","Shoujo","Josei","Award Winning","School","Adult Cast"].includes(g)).slice(0,3));
       spec.likeTitle=a.t;spec.excludeId=a.i;break;}}
   }
+  applySlang(t,spec);
   // negations: "no gore", "without romance", "not too sad", "nothing scary"
-  const negRe=/\b(?:no|without|not|nothing|avoid|skip|zero)\s+(?:too\s+|very\s+|any\s+)?([a-z-]+(?:\s[a-z-]+)?)/g;let nm;const negWords=new Set();
+  const negRe=/\b(?:no|without|not(?! (?:even )?mid\b)|nothing|avoid|skip|zero)\s+(?:too\s+|very\s+|any\s+)?([a-z-]+(?:\s[a-z-]+)?)/g;let nm;const negWords=new Set();
   while((nm=negRe.exec(t))){const w=nm[1].split(" ")[0];negWords.add(w);spec.avoid.push(...synTags(w));if(TG.includes(w))spec.avoid.push(w);if(GENRE_WORDS[w])spec.avoidGenres.push(GENRE_WORDS[w]);}
   // multi-word phrases first
   Object.keys(SYN).filter(k=>k.includes(" ")&&t.includes(" "+k+" ")).forEach(k=>spec.tags.push(...synTags(k)));
@@ -803,6 +872,7 @@ function localSpec(text){
     spec.tags.push(...synTags(w0));
     if(TG.includes(w0))spec.tags.push(w0); else if(w0.endsWith("s")&&TG.includes(w0.slice(0,-1)))spec.tags.push(w0.slice(0,-1)); else if(TG.includes(w0+"s"))spec.tags.push(w0+"s");
     if(GENRE_WORDS[w0])spec.genres.push(GENRE_WORDS[w0]);
+    if(MUST_WORDS.has(w0)&&GENRE_WORDS[w0])(spec.must=spec.must||[]).push(GENRE_WORDS[w0]);
   }
   const m=t.match(/(?:under|less than|max|at most|fewer than|<)\s*(\d+)\s*ep/); if(m) spec.maxEpisodes=+m[1];
   if(/\b(short|quick|binge in a day|one sitting)\b/.test(t)&&!spec.maxEpisodes) spec.maxEpisodes=13;
@@ -815,6 +885,7 @@ function localSpec(text){
   spec.tags=[...new Set(spec.tags)].filter(x=>!spec.avoid.includes(x)).slice(0,24);
   spec.genres=[...new Set(spec.genres)].filter(x=>!spec.avoidGenres.includes(x));
   spec.summary=spec.likeTitle?`Shows like ${spec.likeTitle}${text.match(/\bbut\b/i)?", with your twist":""}`:"";
+  if(spec.slang&&spec.slang.length) spec.summary=(spec.summary?spec.summary+" · ":"")+"read "+spec.slang.slice(0,3).map(h=>`“${h.k}” as ${h.why}`).join(", ");
   return spec;
 }
 async function askMood(text){
@@ -829,6 +900,8 @@ async function askMood(text){
 
 Viewer's request: """${text.slice(0,600)}"""
 
+The request may use internet or anime slang (e.g. "peak"/"cinema" = top-rated, "mid" = average, "aura farming" = cool stoic leads, "unhinged"/"brainrot" = chaotic comedy, "rizz"/"down bad" = romance, "emotional damage"/😭 = sad, "underrated" = obscure). Interpret it the way an anime fan would.
+
 Reply with ONLY one JSON object, no other text:
 {"summary": "one short line restating the mood, max 12 words",
  "tags": [up to 14 strings copied EXACTLY from the TAG LIST that best capture the mood, themes, setting and tone],
@@ -838,6 +911,8 @@ Reply with ONLY one JSON object, no other text:
  "formats": [subset of "TV","Movie","ONA","OVA" — empty array if not specified],
  "maxEpisodes": number or null,
  "minYear": number or null, "maxYear": number or null,
+ "minScore": number or null (e.g. 8.2 if they want only top-rated "peak" shows),
+ "pop": "gems" | "popular" | null,
  "titles": [up to 12 real, existing anime titles (official English or romaji) that fit the request well; prefer first seasons; no sequels]}
 
 GENRE LIST: ${V.join(", ")}
@@ -851,6 +926,10 @@ TAG LIST: ${TG.join(", ")}`;
     }
   }
   if(!spec||typeof spec!=="object"){spec=localSpec(text);via="keywords";}
+  else{const loc={tags:[],genres:[],avoid:[],avoidGenres:[]};applySlang(" "+text.toLowerCase()+" ",loc);
+    spec.tags=[...(spec.tags||[]),...loc.tags];spec.genres=[...(spec.genres||[]),...loc.genres];
+    spec.avoid=[...(spec.avoid||[]),...loc.avoid];spec.avoidGenres=[...(spec.avoidGenres||[]),...loc.avoidGenres];
+    if(!spec.minScore&&loc.minScore)spec.minScore=loc.minScore;if(!spec.pop&&loc.pop)spec.pop=loc.pop;if(loc.notMid)spec.notMid=true;}
   const hits=rankMood(spec);
   state.mood=hits.map(a=>a.i); persist(); renderChips();
   $("moodSum").textContent=hits.length?(spec.summary?String(spec.summary):"Picks for: "+text):"Nothing in the catalog matched that. Try describing it differently.";

@@ -35,7 +35,8 @@ jobs:
         timeout-minutes: 48
         run: |
           python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz" \
-            --cache data/cache/manga-anilist.jsonl.gz --top 10000 --newest 500 --budget-minutes 40
+            --cache data/cache/manga-anilist.jsonl.gz --top 10000 --newest 500 --budget-minutes 40 \
+            --summary data/cache/last-run.txt
           mkdir -p data/cache && cp "$RUNNER_TEMP/manga-raw.jsonl.gz" data/cache/manga-anilist.jsonl.gz
       - name: Build catalog and recommendations
         run: python tools/build_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz" data
@@ -43,7 +44,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/manga.json data/manga-recs.json data/cache/manga-anilist.jsonl.gz
+          git add data/manga.json data/manga-recs.json data/cache/manga-anilist.jsonl.gz data/cache/last-run.txt
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
           git commit -m "Update manga data from AniList"
           git push

@@ -19,10 +19,10 @@ When the time budget runs out it stops and keeps what it has, so a slow day stil
 """
 import gzip, json, re, sys, time, urllib.error, urllib.request
 
-QUERY = """query ($page: Int, $sort: [MediaSort], $below: Int) {
+QUERY = """query ($page: Int, $sort: [MediaSort]BELOW_VAR) {
   Page(page: $page, perPage: 50) {
     pageInfo { hasNextPage }
-    media(type: MANGA, sort: $sort, isAdult: false, popularity_lesser: $below) {
+    media(type: MANGA, sort: $sort, isAdult: falseBELOW_ARG) {
       id idMal isAdult format countryOfOrigin chapters volumes status
       title { romaji english native }
       startDate { year }
@@ -42,9 +42,18 @@ GENRE = {"Thriller": "Suspense", "Mahou Shoujo": "Mahou Shoujo"}
 DEMOS = {"Shounen", "Seinen", "Shoujo", "Josei", "Kids"}
 
 
-def post(url, page, tries=8, sort="ID", below=None):
+ERRORS = []  # first few error responses, written to the run summary
+
+
+def post(url, page, tries=6, sort="ID", below=None):
     delay = 5.0
-    body = json.dumps({"query": QUERY, "variables": {"page": page, "sort": [sort], "below": below}}).encode()
+    # only mention the popularity filter when it's used: some GraphQL servers reject an explicit null
+    q = QUERY.replace("BELOW_VAR", ", $below: Int" if below is not None else "").replace(
+        "BELOW_ARG", ", popularity_lesser: $below" if below is not None else "")
+    v = {"page": page, "sort": [sort]}
+    if below is not None:
+        v["below"] = below
+    body = json.dumps({"query": q, "variables": v}).encode()
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, data=body, headers={
@@ -53,13 +62,20 @@ def post(url, page, tries=8, sort="ID", below=None):
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
+            try: msg = e.read().decode("utf-8", "replace")[:300]
+            except Exception: msg = ""
+            if len(ERRORS) < 8: ERRORS.append(f"HTTP {e.code} on page {page} ({sort}): {msg}")
+            if e.code in (400, 401, 403, 404):
+                print(f"  HTTP {e.code} on page {page}: {msg}", flush=True)
+                return None
             wait = float(e.headers.get("Retry-After") or delay) + 1 if e.code == 429 else delay
             print(f"  HTTP {e.code} on page {page}, retry {attempt + 1} in {wait:.0f}s", flush=True)
         except Exception as e:
             wait = delay
+            if len(ERRORS) < 8: ERRORS.append(f"{type(e).__name__} on page {page} ({sort}): {e}")
             print(f"  {type(e).__name__} on page {page}, retry {attempt + 1} in {wait:.0f}s", flush=True)
         time.sleep(wait)
-        delay = min(delay * 2, 90)
+        delay = min(delay * 2, 60)
     return None
 
 
@@ -94,6 +110,7 @@ def to_row(m):
 
 
 ROWS = {}  # mal_id (or -AniList id) -> row; the cache plus everything fetched this run
+PAGES_OK, PAGES_BAD = [], []
 NEW = set()
 
 
@@ -129,13 +146,13 @@ def fetch(url, sort, max_pages, delay, label, deadline, below=None, want=None, u
         d = post(url, page, sort=sort, below=below)
         p = (d or {}).get("data", {}).get("Page") if d else None
         if not p:
-            streak += 1; failed.append(page)
+            streak += 1; failed.append(page); PAGES_BAD.append(page)
             print(f"{label} page {page}: failed", flush=True)
-            if streak >= 10:
+            if streak >= 5:
                 print(f"{label}: AniList looks unavailable, stopping this pass", flush=True)
                 break
         else:
-            streak = 0
+            streak = 0; PAGES_OK.append(page)
             added += write(p, core=sort != "ID_DESC", update_only=update_only)
             pops = [m.get("popularity") or 0 for m in p.get("media") or []]
             if pops: lowest = min(pops) if lowest is None else min(lowest, min(pops))
@@ -190,6 +207,13 @@ def main():
         for r in ROWS.values():
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     print(f"done: {len(ROWS)} titles in catalog, {len(NEW)} fetched this run", flush=True)
+    summary = arg("--summary", None)
+    if summary:
+        with open(summary, "w") as f:
+            f.write(f"finished {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}\n")
+            f.write(f"catalog {len(ROWS)} titles ({sum(1 for r in ROWS.values() if r.get('core'))} in the popular core), "
+                    f"{len(NEW)} fetched this run, {len(PAGES_OK)} pages ok, {len(PAGES_BAD)} pages failed\n")
+            f.write("".join(f"error: {e}\n" for e in ERRORS))
     if not ROWS:
         sys.exit("No manga downloaded; leaving the old data in place.")
 

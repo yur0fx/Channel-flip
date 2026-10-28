@@ -2,7 +2,7 @@
 
 A free random anime and manga picker. Flip through every anime (`index.html`) or manga (`manga.html`) on MyAnimeList, filter by mood, studio, length and era, describe a mood in your own words, and get recommendations based on any show you love.
 
-It's a static site: two pages plus data files in `data/`. The manga data (`data/manga*.json`) is rebuilt daily by the GitHub Action in `.github/workflows/manga-data.yml` using the scripts in `tools/`. Any free static host works (GitHub Pages, Netlify, Cloudflare Pages).
+It's a static site: two pages plus data files in `data/`. The manga data (`data/manga*.json`, with raw titles kept in `data/cache/`) is updated daily by the GitHub Action in `.github/workflows/manga-data.yml` using the scripts in `tools/`. Any free static host works (GitHub Pages, Netlify, Cloudflare Pages).
 
 ## Data and credits
 

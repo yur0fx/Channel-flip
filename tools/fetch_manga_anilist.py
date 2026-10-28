@@ -9,16 +9,20 @@ negative id (-AniList id) and the site links them to AniList instead.
 Writes gzipped JSON lines in the field layout build_manga.py reads.
 AniList allows roughly 30-90 requests a minute, at 50 manga per request.
 
-Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--top N] [--newest N] [--budget-minutes M] [--url URL] [--delay SECONDS]
+Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--cache CACHE.jsonl.gz] [--top N] [--newest N]
+       [--budget-minutes M] [--url URL] [--delay SECONDS]
+
+With --cache, results are merged into the previous run's titles, so the catalog grows run by run toward --top
+(new releases first, then the next most popular titles not yet in the catalog); once it's full, runs refresh it.
 
 When the time budget runs out it stops and keeps what it has, so a slow day still publishes a (smaller) update.
 """
 import gzip, json, re, sys, time, urllib.error, urllib.request
 
-QUERY = """query ($page: Int, $sort: [MediaSort]) {
+QUERY = """query ($page: Int, $sort: [MediaSort], $below: Int) {
   Page(page: $page, perPage: 50) {
     pageInfo { hasNextPage }
-    media(type: MANGA, sort: $sort, isAdult: false) {
+    media(type: MANGA, sort: $sort, isAdult: false, popularity_lesser: $below) {
       id idMal isAdult format countryOfOrigin chapters volumes status
       title { romaji english native }
       startDate { year }
@@ -38,9 +42,9 @@ GENRE = {"Thriller": "Suspense", "Mahou Shoujo": "Mahou Shoujo"}
 DEMOS = {"Shounen", "Seinen", "Shoujo", "Josei", "Kids"}
 
 
-def post(url, page, tries=8, sort="ID"):
+def post(url, page, tries=8, sort="ID", below=None):
     delay = 5.0
-    body = json.dumps({"query": QUERY, "variables": {"page": page, "sort": [sort]}}).encode()
+    body = json.dumps({"query": QUERY, "variables": {"page": page, "sort": [sort], "below": below}}).encode()
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, data=body, headers={
@@ -89,74 +93,104 @@ def to_row(m):
     }
 
 
-SEEN = set()
+ROWS = {}  # mal_id (or -AniList id) -> row; the cache plus everything fetched this run
+NEW = set()
 
 
-def write(f, p, n, skipped):
+def write(p, core, update_only=False):
+    """Store one page of results; returns how many titles were new to the catalog.
+    `core` marks titles from the popularity list (the newest-additions pass doesn't count toward it)."""
+    added = 0
     for m in p.get("media") or []:
         if m.get("isAdult"):
-            skipped += 1
             continue
         row = to_row(m)
-        if row and row["mal_id"] not in SEEN:
-            SEEN.add(row["mal_id"])
-            f.write(json.dumps(row, ensure_ascii=False) + "\n"); n += 1
-    return n, skipped
+        if row:
+            old = ROWS.get(row["mal_id"])
+            if old is None and update_only:
+                continue
+            if old is None:
+                added += 1
+            row["core"] = core or bool(old and old.get("core"))
+            ROWS[row["mal_id"]] = row
+            NEW.add(row["mal_id"])
+    return added
 
 
-def fetch(f, url, sort, max_pages, delay, n, skipped, label, deadline):
-    page, streak, failed = 1, 0, []
+def fetch(url, sort, max_pages, delay, label, deadline, below=None, want=None, update_only=False):
+    """Page through one sorted list. Stops at max_pages, the deadline, the end of the list, or once
+    `want` new titles were added. Returns (titles added, lowest popularity seen)."""
+    page, streak, added, lowest, failed = 1, 0, 0, None, []
     while page <= max_pages:
         if time.time() > deadline:
-            print(f"{label}: time budget reached at page {page}; keeping the {n} manga downloaded so far", flush=True)
-            return n, skipped
+            print(f"{label}: time budget reached at page {page}", flush=True)
+            break
         t0 = time.time()
-        d = post(url, page, sort=sort)
+        d = post(url, page, sort=sort, below=below)
         p = (d or {}).get("data", {}).get("Page") if d else None
         if not p:
             streak += 1; failed.append(page)
-            print(f"{label} page {page}: failed, will retry at the end", flush=True)
+            print(f"{label} page {page}: failed", flush=True)
             if streak >= 10:
-                sys.exit("AniList looks unavailable (10 pages failed in a row); leaving the old data in place.")
+                print(f"{label}: AniList looks unavailable, stopping this pass", flush=True)
+                break
         else:
             streak = 0
-            n, skipped = write(f, p, n, skipped)
+            added += write(p, core=sort != "ID_DESC", update_only=update_only)
+            pops = [m.get("popularity") or 0 for m in p.get("media") or []]
+            if pops: lowest = min(pops) if lowest is None else min(lowest, min(pops))
             if page % 20 == 0:
-                print(f"{label} page {page}: {n} manga so far", flush=True)
+                print(f"{label} page {page}: {added} new titles, {len(ROWS)} in catalog", flush=True)
             if not (p.get("pageInfo") or {}).get("hasNextPage") or not p.get("media"):
+                break
+            if want is not None and added >= want:
                 break
         page += 1
         time.sleep(max(0.0, delay - (time.time() - t0)))
-    still = []
-    for fp in failed:
-        if time.time() > deadline: still.append(fp); continue
-        time.sleep(max(delay, 5))
-        d = post(url, fp, sort=sort)
-        p = (d or {}).get("data", {}).get("Page") if d else None
-        if p: n, skipped = write(f, p, n, skipped)
-        else: still.append(fp)
-    if still:
-        print(f"{label}: {len(still)} pages could not be fetched {still[:20]}", flush=True)
-    return n, skipped
+    return added, lowest, page
 
 
 def main():
     out = sys.argv[1]
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-    top, newest = int(arg("--top", 10000)), int(arg("--newest", 500))
+    target, newest = int(arg("--top", 10000)), int(arg("--newest", 500))
     url, delay = arg("--url", "https://graphql.anilist.co"), float(arg("--delay", 2.2))
     end = time.time() + 60 * float(arg("--budget-minutes", 30))
-    pages = lambda k: (k + 49) // 50 if k > 0 else 10**6
-    n = skipped = 0
+    cache = arg("--cache", None)
+    if cache:
+        try:
+            with gzip.open(cache, "rt", encoding="utf-8") as f:
+                for line in f:
+                    r = json.loads(line); ROWS[r["mal_id"]] = r
+            print(f"cache: {len(ROWS)} titles", flush=True)
+        except FileNotFoundError:
+            print("cache: none yet", flush=True)
+
+    # 1. newest additions first, so new releases never get crowded out
+    if newest:
+        a, _, _ = fetch(url, "ID_DESC", (newest + 49) // 50, delay, "newest", end)
+        print(f"newest: {a} new titles", flush=True)
+
+    # 2. grow toward the target: continue down the popularity list below the least popular title we have.
+    #    AniList stops a sorted list after 100 pages, so each slice restarts just below the lowest popularity seen.
+    core = lambda: [r for r in ROWS.values() if r.get("core")]
+    while time.time() < end and len(core()) < target:
+        c = core()
+        below = min((r.get("members") or 0) for r in c) + 1 if c else None  # +1 so titles tied at the cut-off aren't skipped
+        a, lowest, page = fetch(url, "POPULARITY_DESC", 100, delay, f"popular<{below}", end, below=below, want=target - len(c))
+        print(f"slice below {below}: {a} new titles, popular core now {len(core())}", flush=True)
+        if a == 0:
+            break
+
+    # 3. catalog is full: spend the rest of the time refreshing the most popular titles (scores, chapters)
+    if len(core()) >= target and time.time() < end:
+        fetch(url, "POPULARITY_DESC", 100, delay, "refresh", end, update_only=True)
+
     with gzip.open(out, "wt", encoding="utf-8") as f:
-        if top == 0 and newest == 0:
-            n, skipped = fetch(f, url, "ID", pages(0), delay, n, skipped, "all", end)
-        else:
-            # leave the last few minutes of the budget for the newest titles
-            if top: n, skipped = fetch(f, url, "POPULARITY_DESC", pages(top), delay, n, skipped, "popular", end - (240 if newest else 0))
-            if newest: n, skipped = fetch(f, url, "ID_DESC", pages(newest), delay, n, skipped, "newest", end)
-    print(f"done: {n} manga ({skipped} explicit skipped)", flush=True)
-    if n == 0:
+        for r in ROWS.values():
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"done: {len(ROWS)} titles in catalog, {len(NEW)} fetched this run", flush=True)
+    if not ROWS:
         sys.exit("No manga downloaded; leaving the old data in place.")
 
 

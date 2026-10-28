@@ -428,16 +428,84 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
   </aside>
 </main>
 
-<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList.</b> The manga list is every manga, manhwa, manhua and light novel on <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>, downloaded weekly through its free API, with explicit adult titles and doujinshi left out. Titles that are also on MyAnimeList link there; the rest link to AniList. Scores marked "AVG SCORE" are AniList's average user rating, "members" counts AniList users with the title on their list, and synopses and covers load from AniList. "Describe a mood" matches your words against each title's genres, themes and story keywords; mention a title ("dark manhwa like Solo Leveling") to start from it. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.</p>
+<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList or AniList.</b> Manga data loads live from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>: the 600 most popular manga, manhwa, manhua and light novels load when you open this page (your browser keeps them for a day), the search box searches all of AniList, and each title's "If you like this" picks are AniList readers' recommendations. Explicit adult titles are left out. Titles that are also on MyAnimeList link there; the rest link to AniList. "AVG SCORE" is AniList's average user rating and "members" counts AniList users with the title on their list. "Describe a mood" matches your words against each loaded title's genres and tags. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.
 
-<div class="boot" id="boot" role="status"><div class="boot-in"><b>Tuning in…</b><span id="bootMsg">Loading the manga list</span></div></div>
+<div class="boot" id="boot" role="status"><div class="boot-in"><b>Tuning in…</b><span id="bootMsg">Loading manga from AniList…</span></div></div>
 <script>
 (async()=>{
 const SITE=true, POSTERS=true;
-let RAW, RECS;
+/* ---------- live AniList data (manga page) ---------- */
+const INIT_HASH=location.hash||"";
+const AL_URL="https://graphql.anilist.co";
+const AL_FIELDS="id idMal isAdult format countryOfOrigin chapters volumes status startDate{year} averageScore popularity genres tags{name rank isMediaSpoiler isAdult} staff(perPage:4,sort:RELEVANCE){edges{role node{name{full}}}} coverImage{large} title{romaji english}";
+const AL_TYPES=["Manga","Manhwa","Manhua","Light Novel","Novel","One-shot","OEL"];
+const AL_STATUS={FINISHED:0,RELEASING:1,NOT_YET_RELEASED:2,HIATUS:3,CANCELLED:4};
+const AL_DEMOS=new Set(["Shounen","Seinen","Shoujo","Josei","Kids"]);
+const AL_PAGES=12, AL_CACHE="cfm.al.v1";
+const wait=ms=>new Promise(z=>setTimeout(z,ms));
+async function alq(query,variables,tries=4){
+  for(let t=0;t<tries;t++){
+    try{
+      const r=await fetch(AL_URL,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query,variables})});
+      if(r.status===429){await wait(((+r.headers.get("Retry-After"))||3)*1000+500);continue;}
+      if(!r.ok) throw 0;
+      const j=await r.json(); if(!j.data) throw 0; return j.data;
+    }catch(e){await wait(1200*(t+1));}
+  }
+  throw new Error("anilist");
+}
+function alType(m){
+  if(m.format==="NOVEL") return "Light Novel";
+  if(m.format==="ONE_SHOT") return "One-shot";
+  if(m.format!=="MANGA") return null;
+  return {KR:"Manhwa",CN:"Manhua",TW:"Manhua",HK:"Manhua"}[m.countryOfOrigin]||"Manga";
+}
+function alParts(m){
+  const ty=m&&alType(m); if(!ty||m.isAdult) return null;
+  const tags=(m.tags||[]).filter(t=>!t.isMediaSpoiler&&!t.isAdult&&(t.rank||0)>=55);
+  const genres=(m.genres||[]).filter(g=>g!=="Hentai").map(g=>g==="Thriller"?"Suspense":g);
+  const authors=[];
+  for(const e of (m.staff&&m.staff.edges)||[]){
+    const r=(e.role||"").toLowerCase();
+    if((r.includes("story")||r.includes("art")||r.includes("original"))&&!r.includes("assist")&&!r.includes("letter")){
+      const n=e.node&&e.node.name&&e.node.name.full; if(n&&!authors.includes(n)) authors.push(n);
+    }
+  }
+  const t=m.title||{};
+  return {id:m.idMal||-m.id, title:t.romaji||t.english||"?", en:t.english&&t.english!==t.romaji?t.english:"", ty,
+    ch:m.chapters||0, vol:m.volumes||0, y:(m.startDate&&m.startDate.year)||0, score:m.averageScore||0, authors,
+    g:[...genres,...tags.filter(x=>AL_DEMOS.has(x.name)).map(x=>x.name)], status:AL_STATUS[m.status]??0,
+    members:m.popularity||0, img:(m.coverImage&&m.coverImage.large)?"al:"+m.coverImage.large.split("/").pop():"",
+    tags:tags.filter(x=>!AL_DEMOS.has(x.name)).map(x=>x.name.toLowerCase())};
+}
+function alBuildRaw(list){
+  const V=[],ST=[],TGL=[],vi=new Map(),si=new Map(),ti=new Map();
+  const ix=(arr,map,k)=>{if(!map.has(k)){map.set(k,arr.length);arr.push(k);}return map.get(k);};
+  const a=[],seen=new Set();
+  for(const m of list){
+    const p=alParts(m); if(!p||seen.has(p.id)) continue; seen.add(p.id);
+    const tg=[...new Set([...p.g.map(x=>x.toLowerCase()),...p.tags].map(x=>ix(TGL,ti,x)))];
+    a.push([p.id,p.title,AL_TYPES.indexOf(p.ty),p.ch,p.vol,p.y,p.score*10,p.authors.map(x=>ix(ST,si,x)),[...new Set(p.g.map(x=>ix(V,vi,x)))],p.status,p.members,p.en,p.img,tg]);
+  }
+  return {kind:"manga",src:"anilist",v:V,ty:AL_TYPES,st:ST,tg:TGL,a};
+}
+async function alLoadPopular(onProgress){
+  try{const c=JSON.parse(localStorage.getItem(AL_CACHE)||"null");if(c&&Date.now()-c.t<864e5&&Array.isArray(c.list)&&c.list.length>100)return c.list;}catch(e){}
+  const q=`query($p:Int){Page(page:$p,perPage:50){media(type:MANGA,sort:POPULARITY_DESC,isAdult:false){${AL_FIELDS}}}}`;
+  const list=[];
+  for(let p=1;p<=AL_PAGES;p+=3){
+    const got=await Promise.all([p,p+1,p+2].filter(x=>x<=AL_PAGES).map(x=>alq(q,{p:x}).then(d=>d.Page.media).catch(()=>[])));
+    got.forEach(g=>list.push(...g)); onProgress(list.length);
+  }
+  if(list.length<50) throw new Error("anilist");
+  try{localStorage.setItem(AL_CACHE,JSON.stringify({t:Date.now(),list}));}catch(e){}
+  return list;
+}
+
+let RAW, RECS={};
 try{
-  [RAW, RECS] = await Promise.all([fetch("data/manga.json").then(r=>{if(!r.ok)throw 0;return r.json();}), fetch("data/manga-recs.json").then(r=>{if(!r.ok)throw 0;return r.json();})]);
-}catch(e){document.getElementById("bootMsg").innerHTML="The manga list isn't ready yet. It's built automatically from MyAnimeList, so check back in about an hour. <a href=\"./\">Flip anime meanwhile →</a>";return;}
+  RAW=alBuildRaw(await alLoadPopular(n=>{document.getElementById("bootMsg").textContent="Loading manga from AniList… "+n;}));
+}catch(e){document.getElementById("bootMsg").innerHTML="Couldn't reach AniList right now. Check your connection and refresh. <a href=\"./\">Flip anime meanwhile →</a>";return;}
 const V = RAW.v, TY = RAW.ty, ST = RAW.st;
 const TG = RAW.tg;
 const posterUrl=a=>POSTERS&&a.img?a.img.startsWith("al:")?"https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/"+a.img.slice(3):"https://cdn.myanimelist.net/images/manga/"+a.img+(a.img.startsWith("al:")?"":".jpg"):"";
@@ -452,7 +520,7 @@ const HAS_ST = new Set(DATA.flatMap(a=>a.studios));
 
 const MOODS=["Action","Adventure","Comedy","Drama","Romance","Fantasy","Sci-Fi","Mystery","Psychological","Horror","Supernatural","Slice of Life","Sports","Music","Award Winning","Isekai","Time Travel","Mecha","Iyashikei","Historical","Gourmet","Magical Girl","Space","Post-Apocalyptic"];
 const AVOID=["Kids","Gore","Ecchi","Harem","Horror","Isekai"];
-const POOLS=[{k:"all",n:"All of MAL"},{k:"pop",n:"Popular hits"},{k:"gems",n:"Hidden gems"},{k:"foryou",n:"♥ For you"},{k:"together",n:"Together"},{k:"mood",n:"Mood picks"}];
+const POOLS=[{k:"all",n:"All manga"},{k:"pop",n:"Popular hits"},{k:"gems",n:"Hidden gems"},{k:"foryou",n:"♥ For you"},{k:"together",n:"Together"},{k:"mood",n:"Mood picks"}];
 const TIMES=[{k:"3",n:"Tonight (≤3h)",h:3},{k:"12",n:"A weekend (≤12h)",h:12},{k:"30",n:"A week (≤30h)",h:30}];
 const QUICK_STUDIOS=["Tatsuki Fujimoto","Inio Asano","Naoki Urasawa","Kentarou Miura","Hiromu Arakawa","ONE","Junji Itou","Takehiko Inoue","Gege Akutami","Hajime Isayama","Eiichiro Oda","Yoshihiro Togashi"];
 const TYPES=[{k:"Manga",n:"Manga"},{k:"Manhwa",n:"Manhwa (Korean)"},{k:"Manhua",n:"Manhua (Chinese)"},{k:"Light Novel",n:"Light novel"},{k:"Novel",n:"Novel"},{k:"One-shot",n:"One-shot"},{k:"OEL",n:"OEL"}];
@@ -512,8 +580,8 @@ function pool(){
   if(state.pool==="mood"){src=state.mood.map(id=>BY_ID.get(id)).filter(Boolean);}
   const tmax=state.time?+state.time:0, studs=state.studios;
   poolCache=src.filter(a=>{
-    if(state.pool==="pop"&&a.m<80000) return false;
-    if(state.pool==="gems"&&a.m>=25000) return false;
+    if(state.pool==="pop"&&a.m<50000) return false;
+    if(state.pool==="gems"&&a.m>=15000) return false;
     if(state.pool!=="mood"&&state.min>0&&a.s<state.min) return false;
     if(state.pool!=="mood"&&state.starters&&!a.starter) return false;
     if(!state.unaired&&a.status===2) return false;
@@ -608,6 +676,7 @@ function render(a){
   $("loveBtn").onclick=()=>{toggle(state.loved,a.i);if(state.loved.includes(a.i)&&!state.seen.includes(a.i))state.seen.push(a.i);persist();render(a);renderLists();changed();};
   tv.querySelectorAll(".rec").forEach(b=>b.onclick=()=>tuneTo(+b.dataset.id));
   if(SITE&&!flipping) loadSyn(a);
+  if(!flipping) alLoadRecs(a);
   if(!flipping) setHash(a);
   tv.querySelectorAll(".stlink").forEach(b=>b.onclick=()=>{toggleSet(state.studios,b.dataset.st);renderChips();changed();$("filtersBox").open=true;});
   tv.querySelectorAll("#tags button").forEach(b=>b.onclick=()=>{
@@ -617,6 +686,7 @@ function render(a){
   });
 }
 function recsHtml(a){
+  if(!RECS[a.i]) return `<section class="recs"><p class="syn-load">Finding manga like this on AniList…</p></section>`;
   const list=(RECS[a.i]||[]).map(([id])=>BY_ID.get(id)).filter(Boolean);
   if(!list.length) return "";
   const seen=new Set(state.seen);
@@ -662,7 +732,7 @@ const norm=s=>s.toLowerCase().normalize("NFKD").replace(/[^\w ]/g,"");
 const IDX=DATA.map(a=>norm(a.t+" "+a.jp));
 let qTimer=null;
 let hitIds=[],act=-1;
-$("q").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>search(e.target.value),100);};
+$("q").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>search(e.target.value),100);if(mode==="title")alSearch(e.target.value);};
 $("q").onfocus=e=>{if(e.target.value.trim().length>=2)search(e.target.value);};
 $("q").onkeydown=e=>{
   const el=$("results");
@@ -743,7 +813,7 @@ function rankMood(spec){
     if(y0&&a.y&&a.y<y0) continue; if(y1&&a.y&&a.y>y1) continue;
     if(qMin&&!nm&&!(a.s>=qMin)) continue;
     if(spec.midRange&&!nm&&!(a.s>=6.4&&a.s<7.5)) continue;
-    if(pop==="gems"&&!nm&&!(a.m>1000&&a.m<40000)) continue;
+    if(pop==="gems"&&!nm&&!(a.m>500&&a.m<15000)) continue;
     if(!kidsOk&&a.g.includes("Kids")) continue;
     if(gAvoid.some(g=>a.g.includes(g))) continue;
     if(spec.must&&!nm&&!spec.must.every(g=>a.g.includes(g))) continue;
@@ -988,7 +1058,7 @@ function renderTogether(){
   el.querySelectorAll("button.fy").forEach(b=>b.onclick=()=>tuneTo(+b.dataset.id));
   const tf=$("tgFlip");if(tf)tf.onclick=()=>{state.pool="together";renderChips();changed();flip();};
 }
-$("fq").oninput=e=>{
+$("fq").oninput=e=>{if(!e.noAl)alSearch(e.target.value);
   const el=$("fresults"),top=findTitles(e.target.value,8);
   if(!top){el.hidden=true;return;}
   el.innerHTML=top.length?top.map(a=>`<li><button type="button" data-id="${a.i}"><span class="r1">${esc(a.t)}</span><small>${a.ty} · ${a.y||"?"}</small></button></li>`).join(""):`<li class="none">No title matches that.</li>`;
@@ -1092,6 +1162,47 @@ function setHash(a){try{const h="#manga-"+a.i;if(location.hash!==h)history.repla
 function hashId(){const m=(location.hash||"").match(/^#manga-(-?\d+)$/);return m&&BY_ID.has(+m[1])?+m[1]:0;}
 window.addEventListener("hashchange",()=>{const id=hashId();if(id&&(!state.current||state.current.i!==id))tuneTo(id);});
 
+/* ---------- live AniList: titles added after load, recommendations, search ---------- */
+function alAdd(m){
+  const p=alParts(m); if(!p) return null;
+  if(BY_ID.has(p.id)) return p.id;
+  const tgi=x=>{let k=TG.indexOf(x);if(k<0){k=TG.length;TG.push(x);TG_W.push(1);}return k;};
+  const a={i:p.id,t:p.en||p.title,jp:p.en?p.title:"",ty:p.ty,ep:p.ch,vol:p.vol,y:p.y,s:p.score/10,st:p.authors[0]||"",studios:p.authors,g:[...new Set(p.g)],starter:true,status:[0,1,2,1,0][p.status]??0,hiatus:p.status===3,m:p.members,l:"",mal:false,dur:300,tg:[...new Set([...p.g.map(x=>x.toLowerCase()),...p.tags].map(tgi))],img:p.img};
+  DATA.push(a);BY_ID.set(a.i,a);IDX.push(norm(a.t+" "+a.jp));p.authors.forEach(x=>HAS_ST.add(x));poolCache=null;
+  return a.i;
+}
+const REC_STATE=new Map();
+async function alLoadRecs(a){
+  if(RECS[a.i]||REC_STATE.has(a.i)) return;
+  REC_STATE.set(a.i,"loading");
+  try{
+    const d=await alq(`query($id:Int,$mal:Int){Media(id:$id,idMal:$mal,type:MANGA){recommendations(perPage:12,sort:RATING_DESC){nodes{rating mediaRecommendation{${AL_FIELDS}}}}}}`,a.i<0?{id:-a.i}:{mal:a.i},2);
+    const nodes=(((d.Media||{}).recommendations||{}).nodes)||[];
+    const out=[];for(const n of nodes){const id=n.mediaRecommendation&&alAdd(n.mediaRecommendation);if(id!=null&&id!==a.i&&!out.some(x=>x[0]===id))out.push([id,Math.max(1,Math.min(99,n.rating||1))]);if(out.length===8)break;}
+    RECS[a.i]=out;
+  }catch(e){RECS[a.i]=[];}
+  REC_STATE.set(a.i,"done");
+  if(state.current&&state.current.i===a.i&&!flipping) render(a);
+}
+let alSearchT=null,alSearchCtl=null;
+function alSearch(q){
+  clearTimeout(alSearchT);
+  q=String(q||"").trim(); if(q.length<3) return;
+  alSearchT=setTimeout(async()=>{
+    try{
+      const d=await alq(`query($s:String){Page(perPage:12){media(search:$s,type:MANGA,isAdult:false,sort:SEARCH_MATCH){${AL_FIELDS}}}}`,{s:q},2);
+      let added=0;(d.Page.media||[]).forEach(m=>{const before=DATA.length;alAdd(m);if(DATA.length>before)added++;});
+      if(added&&mode==="title"&&$("q").value.trim()===q) search(q);
+      if(added&&$("fq").value.trim()===q) $("fq").oninput({target:$("fq")});
+    }catch(e){}
+  },350);
+}
+async function alOpenHash(){
+  const m=INIT_HASH.match(/^#manga-(-?\d+)$/); if(!m) return;
+  const id=+m[1]; if(BY_ID.has(id)) return;
+  try{const d=await alq(`query($id:Int,$mal:Int){Media(id:$id,idMal:$mal,type:MANGA){${AL_FIELDS}}}`,id<0?{id:-id}:{mal:id},2);const nid=alAdd(d.Media);if(nid!=null)tuneTo(nid);}catch(e){}
+}
+
 /* static */
 const cv=$("noise"),cx=cv.getContext("2d");let noiseRaf=null;
 function noise(){
@@ -1133,12 +1244,13 @@ $("clearGenres").onclick=()=>{state.genres.clear();renderChips();changed();if(st
 $("clearSeen").onclick=()=>{state.seen=[];persist();renderLists();changed();};
 $("flipBtn").onclick=flip;
 document.addEventListener("keydown",e=>{if(e.code==="Space"&&!/INPUT|BUTTON|A|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();flip();}});
-$("totalCount").textContent=DATA.length.toLocaleString("en");
+$("totalCount").textContent=DATA.length.toLocaleString("en")+" popular";
 
 updateCount();renderLists();renderForYou();renderSum();renderTogether();renderStats();
 document.querySelectorAll(".tabs [role=tab]").forEach(t=>t.onclick=()=>{document.querySelectorAll(".tabs [role=tab]").forEach(x=>{const on=x===t;x.setAttribute("aria-selected",on);$(x.getAttribute("aria-controls")).hidden=!on;});});
 const first=pool(),hid=hashId();state.current=hid?BY_ID.get(hid):(first.length?pickFrom(first):null);if(state.current)state.recent.push(state.current.i);render(state.current);
 document.getElementById("boot").remove();
+alOpenHash();
 })();
 </script>
 

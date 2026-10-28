@@ -47,6 +47,7 @@ jobs:
           git add data/manga.json data/manga-recs.json data/cache/manga-anilist.jsonl.gz data/cache/last-run.txt
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
           git commit -m "Update manga data from AniList"
+          git pull --rebase origin main   # page edits may have landed during the run
           git push
       - name: Rebuild GitHub Pages
         continue-on-error: true

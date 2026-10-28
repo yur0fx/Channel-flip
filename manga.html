@@ -428,7 +428,7 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
   </aside>
 </main>
 
-<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList.</b> The manga list is every manga, manhwa, manhua and light novel on MyAnimeList, downloaded weekly through the free <a href="https://jikan.moe" target="_blank" rel="noopener">Jikan</a> API (or <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a> as a backup), with explicit adult titles and doujinshi left out. Scores, member counts, authors and covers come from MyAnimeList. "Describe a mood" matches your words against each title's genres, themes and story keywords; mention a title ("dark manhwa like Solo Leveling") to start from it. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.</p>
+<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList.</b> The manga list is every manga, manhwa, manhua and light novel on <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a> (or MyAnimeList through the <a href="https://jikan.moe" target="_blank" rel="noopener">Jikan</a> API as a backup), downloaded weekly, with explicit adult titles and doujinshi left out. Titles that are also on MyAnimeList link there; the rest link to AniList. Scores marked "AVG SCORE" are AniList's average user rating, and "members" counts AniList users with the title on their list. "Describe a mood" matches your words against each title's genres, themes and story keywords; mention a title ("dark manhwa like Solo Leveling") to start from it. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.</p>
 
 <div class="boot" id="boot" role="status"><div class="boot-in"><b>Tuning in…</b><span id="bootMsg">Loading the manga list</span></div></div>
 <script>
@@ -497,7 +497,7 @@ function persist(){
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const malUrl=a=>"https://myanimelist.net/manga/"+a.i;
+const malUrl=a=>a.i<0?"https://anilist.co/manga/"+(-a.i):"https://myanimelist.net/manga/"+a.i;
 const fmtM=n=>n>=1e6?(n/1e6).toFixed(1)+"M":Math.round(n/1e3)+"K";
 const fmtH=h=>h<1?Math.round(h*60)+" min to read":h<10?h.toFixed(1).replace(/\.0$/,"")+" h to read":Math.round(h)+" h to read";
 
@@ -583,7 +583,7 @@ function render(a){
   const eps=a.ty==="One-shot"?"One-shot":([a.ep?a.ep+" ch":"",a.vol?a.vol+" vol":""].filter(Boolean).join(" · ")||(a.status===1?"ongoing":"? ch"));
   const score=a.s>0?`★ ${a.s.toFixed(2)}<small>${a.mal?"MAL SCORE":"AVG SCORE"}</small>`:`★ —<small>NOT SCORED</small>`;
   tv.innerHTML=`
-    <div class="osd"><div class="ch">MAL<br><b>${a.i}</b></div><div class="score">${score}</div></div>
+    <div class="osd"><div class="ch">${a.i<0?"ANILIST":"MAL"}<br><b>${Math.abs(a.i)}</b></div><div class="score">${score}</div></div>
     <div class="show">
       <div class="head"><div class="hl">
       <div class="title-row"><h2><a href="${malUrl(a)}" target="_blank" rel="noopener" id="titleLink">${esc(a.t)}</a></h2><button class="copy" id="copyBtn" type="button" aria-label="Copy manga name">Copy</button></div>
@@ -594,7 +594,7 @@ function render(a){
       ${SITE?`<div class="syn" id="syn" data-id="${a.i}">${synHtml(a)}</div>`:(a.l?"":`<p class="nolog">No premise saved for this one. Open it on MyAnimeList for the synopsis, trailer and reviews.</p>`)}
       ${a.g.length?`<div class="tags" id="tags">${a.g.map((g,k)=>`<button type="button" data-g="${esc(g)}" aria-pressed="${state.genres.has(g)}" title="Only flip to ${esc(g)} shows"${k>=6?" hidden":""}>${esc(g)}</button>`).join("")}${a.g.length>6?`<button type="button" class="more" id="moreTags">+${a.g.length-6}</button>`:""}</div>`:""}
       <div class="actions">
-        <a class="btn mal" href="${malUrl(a)}" target="_blank" rel="noopener">MyAnimeList ↗</a>
+        <a class="btn mal" href="${malUrl(a)}" target="_blank" rel="noopener">${a.i<0?"AniList":"MyAnimeList"} ↗</a>
         <button class="btn ${isSaved?"saved":""}" id="saveBtn" type="button" aria-pressed="${isSaved}">${isSaved?"★ Watchlist":"☆ Watchlist"}</button>
         <button class="btn ${isLoved?"loved":""}" id="loveBtn" type="button" aria-pressed="${isLoved}">${isLoved?"♥ Loved":"♡ Loved"}</button>
         <button class="btn" id="seenBtn" type="button" title="Mark as read and flip again">${isSeen?"✓ Read":"Read · next"}</button>
@@ -1065,7 +1065,7 @@ const SYN_CACHE=new Map();let synQ=Promise.resolve();
 function synHtml(a){
   const s=SYN_CACHE.get(a.i);
   if(s===undefined) return `<p class="syn-load">Loading synopsis…</p>`;
-  if(!s) return a.l?"":`<p class="nolog">No synopsis available. <a href="${malUrl(a)}" target="_blank" rel="noopener">See it on MyAnimeList</a>.</p>`;
+  if(!s) return a.l?"":`<p class="nolog">No synopsis available. <a href="${malUrl(a)}" target="_blank" rel="noopener">See it on ${a.i<0?"AniList":"MyAnimeList"}</a>.</p>`;
   const L=innerWidth<600?260:420, short=s.length>L?s.slice(0,s.lastIndexOf(" ",L))+"…":s;
   return `<p class="syntext">${esc(short)}</p>${s.length>L?`<button type="button" class="linkbtn more-syn" data-full="1">Read more</button>`:""}`;
 }
@@ -1077,6 +1077,7 @@ function loadSyn(a){
     if(SYN_CACHE.has(a.i)) return paint();
     if(state.current&&state.current.i!==a.i) return;
     try{
+      if(a.i<0){SYN_CACHE.set(a.i,null);paint();return;}
       const r=await fetch("https://api.jikan.moe/v4/manga/"+a.i);
       if(r.status===429){await new Promise(z=>setTimeout(z,1100));return loadSyn(a);}
       const j=r.ok?await r.json():null;
@@ -1089,7 +1090,7 @@ function loadSyn(a){
   });
 }
 function setHash(a){try{const h="#manga-"+a.i;if(location.hash!==h)history.replaceState(null,"",h);}catch(e){}}
-function hashId(){const m=(location.hash||"").match(/^#manga-(\d+)$/);return m&&BY_ID.has(+m[1])?+m[1]:0;}
+function hashId(){const m=(location.hash||"").match(/^#manga-(-?\d+)$/);return m&&BY_ID.has(+m[1])?+m[1]:0;}
 window.addEventListener("hashchange",()=>{const id=hashId();if(id&&(!state.current||state.current.i!==id))tuneTo(id);});
 
 /* static */

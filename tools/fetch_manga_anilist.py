@@ -9,7 +9,9 @@ negative id (-AniList id) and the site links them to AniList instead.
 Writes gzipped JSON lines in the field layout build_manga.py reads.
 AniList allows roughly 30-90 requests a minute, at 50 manga per request.
 
-Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--top N] [--newest N] [--url URL] [--delay SECONDS]
+Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--top N] [--newest N] [--budget-minutes M] [--url URL] [--delay SECONDS]
+
+When the time budget runs out it stops and keeps what it has, so a slow day still publishes a (smaller) update.
 """
 import gzip, json, re, sys, time, urllib.error, urllib.request
 
@@ -103,9 +105,12 @@ def write(f, p, n, skipped):
     return n, skipped
 
 
-def fetch(f, url, sort, max_pages, delay, n, skipped, label):
+def fetch(f, url, sort, max_pages, delay, n, skipped, label, deadline):
     page, streak, failed = 1, 0, []
     while page <= max_pages:
+        if time.time() > deadline:
+            print(f"{label}: time budget reached at page {page}; keeping the {n} manga downloaded so far", flush=True)
+            return n, skipped
         t0 = time.time()
         d = post(url, page, sort=sort)
         p = (d or {}).get("data", {}).get("Page") if d else None
@@ -125,6 +130,7 @@ def fetch(f, url, sort, max_pages, delay, n, skipped, label):
         time.sleep(max(0.0, delay - (time.time() - t0)))
     still = []
     for fp in failed:
+        if time.time() > deadline: still.append(fp); continue
         time.sleep(max(delay, 5))
         d = post(url, fp, sort=sort)
         p = (d or {}).get("data", {}).get("Page") if d else None
@@ -140,14 +146,16 @@ def main():
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
     top, newest = int(arg("--top", 10000)), int(arg("--newest", 500))
     url, delay = arg("--url", "https://graphql.anilist.co"), float(arg("--delay", 2.2))
+    end = time.time() + 60 * float(arg("--budget-minutes", 30))
     pages = lambda k: (k + 49) // 50 if k > 0 else 10**6
     n = skipped = 0
     with gzip.open(out, "wt", encoding="utf-8") as f:
         if top == 0 and newest == 0:
-            n, skipped = fetch(f, url, "ID", pages(0), delay, n, skipped, "all")
+            n, skipped = fetch(f, url, "ID", pages(0), delay, n, skipped, "all", end)
         else:
-            if top: n, skipped = fetch(f, url, "POPULARITY_DESC", pages(top), delay, n, skipped, "popular")
-            if newest: n, skipped = fetch(f, url, "ID_DESC", pages(newest), delay, n, skipped, "newest")
+            # leave the last few minutes of the budget for the newest titles
+            if top: n, skipped = fetch(f, url, "POPULARITY_DESC", pages(top), delay, n, skipped, "popular", end - (240 if newest else 0))
+            if newest: n, skipped = fetch(f, url, "ID_DESC", pages(newest), delay, n, skipped, "newest", end)
     print(f"done: {n} manga ({skipped} explicit skipped)", flush=True)
     if n == 0:
         sys.exit("No manga downloaded; leaving the old data in place.")

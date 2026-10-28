@@ -428,7 +428,7 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
   </aside>
 </main>
 
-<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList or AniList.</b> Manga data loads live from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>: the 600 most popular manga, manhwa, manhua and light novels load when you open this page (your browser keeps them for a day), the search box searches all of AniList, and each title's "If you like this" picks are AniList readers' recommendations. Explicit adult titles are left out. Titles that are also on MyAnimeList link there; the rest link to AniList. "AVG SCORE" is AniList's average user rating and "members" counts AniList users with the title on their list. "Describe a mood" matches your words against each loaded title's genres and tags. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.
+<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList or AniList.</b> Manga data comes from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>: a daily update downloads the 10,000 most popular manga, manhwa, manhua and light novels plus the newest additions, and the search box searches all of AniList live, so brand-new titles are findable right away. "If you like this" picks match titles by genres, tags, authors and story; for titles added through search they are AniList readers' recommendations. Explicit adult titles are left out. Titles that are also on MyAnimeList link there; the rest link to AniList. "AVG SCORE" is AniList's average user rating and "members" counts AniList users with the title on their list. "Describe a mood" matches your words against each loaded title's genres and tags. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.
 
 <div class="boot" id="boot" role="status"><div class="boot-in"><b>Tuning in…</b><span id="bootMsg">Loading manga from AniList…</span></div></div>
 <script>
@@ -502,9 +502,11 @@ async function alLoadPopular(onProgress){
   return list;
 }
 
-let RAW, RECS={};
+let RAW, RECS={}, LIVE_ONLY=false;
 try{
-  RAW=alBuildRaw(await alLoadPopular(n=>{document.getElementById("bootMsg").textContent="Loading manga from AniList… "+n;}));
+  const [c,r]=await Promise.all(["data/manga.json","data/manga-recs.json"].map(u=>fetch(u,{cache:"no-cache"}).then(x=>x.ok?x.json():null).catch(()=>null)));
+  if(c&&Array.isArray(c.a)&&c.a.length>1000){RAW=c;RECS=r||{};}
+  else{LIVE_ONLY=true;RAW=alBuildRaw(await alLoadPopular(n=>{document.getElementById("bootMsg").textContent="Loading manga from AniList… "+n;}));}
 }catch(e){document.getElementById("bootMsg").innerHTML="Couldn't reach AniList right now. Check your connection and refresh. <a href=\"./\">Flip anime meanwhile →</a>";return;}
 const V = RAW.v, TY = RAW.ty, ST = RAW.st;
 const TG = RAW.tg;
@@ -580,8 +582,8 @@ function pool(){
   if(state.pool==="mood"){src=state.mood.map(id=>BY_ID.get(id)).filter(Boolean);}
   const tmax=state.time?+state.time:0, studs=state.studios;
   poolCache=src.filter(a=>{
-    if(state.pool==="pop"&&a.m<50000) return false;
-    if(state.pool==="gems"&&a.m>=15000) return false;
+    if(state.pool==="pop"&&a.m<30000) return false;
+    if(state.pool==="gems"&&a.m>=8000) return false;
     if(state.pool!=="mood"&&state.min>0&&a.s<state.min) return false;
     if(state.pool!=="mood"&&state.starters&&!a.starter) return false;
     if(!state.unaired&&a.status===2) return false;
@@ -813,7 +815,7 @@ function rankMood(spec){
     if(y0&&a.y&&a.y<y0) continue; if(y1&&a.y&&a.y>y1) continue;
     if(qMin&&!nm&&!(a.s>=qMin)) continue;
     if(spec.midRange&&!nm&&!(a.s>=6.4&&a.s<7.5)) continue;
-    if(pop==="gems"&&!nm&&!(a.m>500&&a.m<15000)) continue;
+    if(pop==="gems"&&!nm&&!(a.m>500&&a.m<8000)) continue;
     if(!kidsOk&&a.g.includes("Kids")) continue;
     if(gAvoid.some(g=>a.g.includes(g))) continue;
     if(spec.must&&!nm&&!spec.must.every(g=>a.g.includes(g))) continue;
@@ -1244,7 +1246,7 @@ $("clearGenres").onclick=()=>{state.genres.clear();renderChips();changed();if(st
 $("clearSeen").onclick=()=>{state.seen=[];persist();renderLists();changed();};
 $("flipBtn").onclick=flip;
 document.addEventListener("keydown",e=>{if(e.code==="Space"&&!/INPUT|BUTTON|A|SELECT|TEXTAREA/.test(e.target.tagName)){e.preventDefault();flip();}});
-$("totalCount").textContent=DATA.length.toLocaleString("en")+" popular";
+$("totalCount").textContent=DATA.length.toLocaleString("en")+(LIVE_ONLY?" popular":"");
 
 updateCount();renderLists();renderForYou();renderSum();renderTogether();renderStats();
 document.querySelectorAll(".tabs [role=tab]").forEach(t=>t.onclick=()=>{document.querySelectorAll(".tabs [role=tab]").forEach(x=>{const on=x===t;x.setAttribute("aria-selected",on);$(x.getAttribute("aria-controls")).hidden=!on;});});

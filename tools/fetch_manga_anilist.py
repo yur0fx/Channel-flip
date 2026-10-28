@@ -1,19 +1,22 @@
-"""Download every manga on AniList (~80,000, explicit titles excluded) via AniList's free GraphQL API.
+"""Download manga from AniList's free GraphQL API (explicit titles excluded).
+
+By default it takes the 10,000 most popular manga plus the 500 most recently added ones, which takes about
+10 minutes. Pass --top 0 --newest 0 to download everything (~80,000, about an hour).
 
 Entries linked to MyAnimeList keep their MAL id (the site links them to MyAnimeList); AniList-only entries get a
 negative id (-AniList id) and the site links them to AniList instead.
 
 Writes gzipped JSON lines in the field layout build_manga.py reads.
-AniList allows roughly 30-90 requests a minute; at 50 manga per request the full list takes about an hour.
+AniList allows roughly 30-90 requests a minute, at 50 manga per request.
 
-Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--max-pages N] [--url URL] [--delay SECONDS]
+Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--top N] [--newest N] [--url URL] [--delay SECONDS]
 """
 import gzip, json, re, sys, time, urllib.error, urllib.request
 
-QUERY = """query ($page: Int) {
+QUERY = """query ($page: Int, $sort: [MediaSort]) {
   Page(page: $page, perPage: 50) {
     pageInfo { hasNextPage }
-    media(type: MANGA, sort: ID) {
+    media(type: MANGA, sort: $sort, isAdult: false) {
       id idMal isAdult format countryOfOrigin chapters volumes status
       title { romaji english native }
       startDate { year }
@@ -34,9 +37,9 @@ GENRE = {"Thriller": "Suspense", "Mahou Shoujo": "Mahou Shoujo"}
 DEMOS = {"Shounen", "Seinen", "Shoujo", "Josei", "Kids"}
 
 
-def post(url, page, tries=8):
+def post(url, page, tries=8, sort="ID"):
     delay = 5.0
-    body = json.dumps({"query": QUERY, "variables": {"page": page}}).encode()
+    body = json.dumps({"query": QUERY, "variables": {"page": page, "sort": [sort]}}).encode()
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, data=body, headers={
@@ -85,49 +88,67 @@ def to_row(m):
     }
 
 
+SEEN = set()
+
+
 def write(f, p, n, skipped):
     for m in p.get("media") or []:
         if m.get("isAdult"):
             skipped += 1
             continue
         row = to_row(m)
-        if row:
+        if row and row["mal_id"] not in SEEN:
+            SEEN.add(row["mal_id"])
             f.write(json.dumps(row, ensure_ascii=False) + "\n"); n += 1
+    return n, skipped
+
+
+def fetch(f, url, sort, max_pages, delay, n, skipped, label):
+    page, streak, failed = 1, 0, []
+    while page <= max_pages:
+        t0 = time.time()
+        d = post(url, page, sort=sort)
+        p = (d or {}).get("data", {}).get("Page") if d else None
+        if not p:
+            streak += 1; failed.append(page)
+            print(f"{label} page {page}: failed, will retry at the end", flush=True)
+            if streak >= 10:
+                sys.exit("AniList looks unavailable (10 pages failed in a row); leaving the old data in place.")
+        else:
+            streak = 0
+            n, skipped = write(f, p, n, skipped)
+            if page % 20 == 0:
+                print(f"{label} page {page}: {n} manga so far", flush=True)
+            if not (p.get("pageInfo") or {}).get("hasNextPage") or not p.get("media"):
+                break
+        page += 1
+        time.sleep(max(0.0, delay - (time.time() - t0)))
+    still = []
+    for fp in failed:
+        time.sleep(max(delay, 5))
+        d = post(url, fp, sort=sort)
+        p = (d or {}).get("data", {}).get("Page") if d else None
+        if p: n, skipped = write(f, p, n, skipped)
+        else: still.append(fp)
+    if still:
+        print(f"{label}: {len(still)} pages could not be fetched {still[:20]}", flush=True)
     return n, skipped
 
 
 def main():
     out = sys.argv[1]
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-    max_pages, url, delay = int(arg("--max-pages", 10**6)), arg("--url", "https://graphql.anilist.co"), float(arg("--delay", 2.2))
-    page, n, skipped, streak, failed = 1, 0, 0, 0, []
+    top, newest = int(arg("--top", 10000)), int(arg("--newest", 500))
+    url, delay = arg("--url", "https://graphql.anilist.co"), float(arg("--delay", 2.2))
+    pages = lambda k: (k + 49) // 50 if k > 0 else 10**6
+    n = skipped = 0
     with gzip.open(out, "wt", encoding="utf-8") as f:
-        while page <= max_pages:
-            d = post(url, page)
-            p = (d or {}).get("data", {}).get("Page") if d else None
-            if not p:
-                streak += 1; failed.append(page)
-                print(f"page {page}: failed, will retry at the end", flush=True)
-                if streak >= 10:
-                    sys.exit("AniList looks unavailable (10 pages failed in a row).")
-                page += 1
-                continue
-            streak = 0
-            n, skipped = write(f, p, n, skipped)
-            if page % 50 == 0:
-                print(f"page {page}: {n} manga kept, {skipped} explicit titles skipped", flush=True)
-            if not (p.get("pageInfo") or {}).get("hasNextPage"):
-                break
-            page += 1
-            time.sleep(delay)
-        still = []
-        for fp in failed:
-            time.sleep(max(delay, 5))
-            d = post(url, fp)
-            p = (d or {}).get("data", {}).get("Page") if d else None
-            if p: n, skipped = write(f, p, n, skipped)
-            else: still.append(fp)
-    print(f"done: {n} manga from {page} pages; {len(still)} pages could not be fetched {still[:20]}", flush=True)
+        if top == 0 and newest == 0:
+            n, skipped = fetch(f, url, "ID", pages(0), delay, n, skipped, "all")
+        else:
+            if top: n, skipped = fetch(f, url, "POPULARITY_DESC", pages(top), delay, n, skipped, "popular")
+            if newest: n, skipped = fetch(f, url, "ID_DESC", pages(newest), delay, n, skipped, "newest")
+    print(f"done: {n} manga ({skipped} explicit skipped)", flush=True)
     if n == 0:
         sys.exit("No manga downloaded; leaving the old data in place.")
 

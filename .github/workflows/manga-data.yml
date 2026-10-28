@@ -1,12 +1,12 @@
 name: Update manga data
 
-# Downloads every manga from AniList's free API, rebuilds data/manga.json and
-# data/manga-recs.json, and commits them. Runs once a week, and can be started by hand from the
-# Actions tab ("Run workflow").
+# Downloads the 10,000 most popular manga plus the 500 newest additions from AniList's free API
+# (about 10 minutes), rebuilds data/manga.json and data/manga-recs.json, and commits them.
+# Runs once a day, and can be started by hand from the Actions tab ("Run workflow").
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 3 * * 1"   # Mondays 03:17 UTC
+    - cron: "23 4 * * *"   # every day, 04:23 UTC
   push:
     branches: [main]
     paths: ["tools/fetch_manga_anilist.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,9 +30,9 @@ jobs:
           python-version: "3.12"
       - name: Install build dependencies
         run: pip install --quiet numpy scipy scikit-learn
-      - name: Download all manga from AniList (about an hour)
-        timeout-minutes: 240
-        run: python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
+      - name: Download the top 10,000 + newest manga from AniList (about 10 minutes)
+        timeout-minutes: 40
+        run: python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz" --top 10000 --newest 500
       - name: Build catalog and recommendations
         run: python tools/build_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz" data
       - name: Commit updated data

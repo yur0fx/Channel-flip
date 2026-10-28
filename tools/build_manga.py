@@ -68,7 +68,8 @@ def A(name):
 # synopsis keywords → the "detailed tags" mood search matches against
 tok = lambda s: [w for w in re.findall(r"[a-z][a-z'-]{3,}", (s or "").lower()) if w not in STOP and not w.endswith("'s")]
 docs = [" ".join(tok(m.get("synopsis"))) for m in rows]
-kv = TfidfVectorizer(min_df=20, max_df=0.04, sublinear_tf=True, max_features=1500)
+kv = TfidfVectorizer(min_df=max(2, min(20, len(docs) // 400)), max_df=0.04 if len(docs) > 3000 else 0.5,
+                     sublinear_tf=True, max_features=1500)
 KW = kv.fit_transform(docs)
 kw_vocab = list(kv.get_feature_names_out())
 

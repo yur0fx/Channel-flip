@@ -74,7 +74,11 @@ kw_vocab = list(kv.get_feature_names_out())
 
 # tag vocabulary: MAL genres/themes (lowercase) first, then synopsis keywords
 theme_names = sorted({g["name"] for m in rows for key in ("genres", "themes", "demographics") for g in (m.get(key) or [])})
-TG = [t.lower() for t in theme_names] + [w for w in kw_vocab if w not in {t.lower() for t in theme_names}]
+al_cnt = collections.Counter(t.lower() for m in rows for t in (m.get("al_tags") or []))
+al_vocab = [t for t, c in al_cnt.most_common() if c >= 15][:900]
+base_tags = [t.lower() for t in theme_names] + [t for t in al_vocab if t not in {x.lower() for x in theme_names}]
+TG = base_tags + [w for w in kw_vocab if w not in set(base_tags)]
+SRC = "anilist" if al_cnt else "mal"
 tgi = {t: i for i, t in enumerate(TG)}
 
 out = []
@@ -84,18 +88,21 @@ for k, m in enumerate(rows):
     pub = (m.get("published") or {}).get("prop", {}).get("from", {}) or {}
     img = ((m.get("images") or {}).get("jpg") or {}).get("image_url") or ""
     mm = re.search(r"/images/manga/(\d+/\d+)\.", img)
+    cover = m.get("cover") or ""
+    img_path = mm.group(1) if mm else ("al:" + cover.rsplit("/", 1)[-1] if cover else "")
     row = KW.getrow(k)
     top = [kw_vocab[j] for j in row.indices[np.argsort(-row.data)][:12]] if row.nnz else []
-    tg = sorted({tgi[g.lower()] for g in gs} | {tgi[w] for w in top if w in tgi})
+    tg = sorted({tgi[g.lower()] for g in gs} | {tgi[w] for w in top if w in tgi}
+                | {tgi[t.lower()] for t in (m.get("al_tags") or []) if t.lower() in tgi})
     en = (m.get("title_english") or "").strip()
     out.append([
         m["mal_id"], m.get("title") or en, TYPES.index(m["type"]), m.get("chapters") or 0, m.get("volumes") or 0,
         pub.get("year") or 0, int(round((m.get("score") or 0) * 100)), [A(a) for a in authors],
         sorted({G(g) for g in gs}), STATUS.get(m.get("status"), 0), m.get("members") or 0,
-        en if en and en != m.get("title") else "", mm.group(1) if mm else "", tg,
+        en if en and en != m.get("title") else "", img_path, tg,
     ])
 
-json.dump({"kind": "manga", "v": GV, "ty": TYPES, "st": AU, "tg": TG, "a": out},
+json.dump({"kind": "manga", "src": SRC, "v": GV, "ty": TYPES, "st": AU, "tg": TG, "a": out},
           open(f"{outdir}/manga.json", "w"), ensure_ascii=False, separators=(",", ":"))
 print("catalog", len(out), "genres", len(GV), "authors", len(AU), "tags", len(TG), file=sys.stderr)
 
@@ -112,6 +119,7 @@ for m in rows:
     toks = ["g_" + re.sub(r"\W", "", g) for g in gs] * 3
     toks += ["a_" + re.sub(r"\W", "", nm(a)) for a in (m.get("authors") or [])] * 2
     toks += ["s_" + re.sub(r"\W", "", s.get("name") or "") for s in (m.get("serializations") or [])]
+    toks += ["t_" + re.sub(r"\W", "", t) for t in (m.get("al_tags") or [])] * 2
     feat_docs.append(" ".join(toks))
 fv = TfidfVectorizer(token_pattern=r"\S+", min_df=2, sublinear_tf=True, lowercase=False)
 F = normalize(hstack([normalize(fv.fit_transform(feat_docs)) * 0.75, KW * 0.55]).tocsr())

@@ -5,11 +5,17 @@ name: Update manga data
 # Actions tab ("Run workflow").
 on:
   workflow_dispatch:
+    inputs:
+      source:
+        description: "Where to download the manga list from"
+        type: choice
+        options: [jikan, anilist]
+        default: jikan
   schedule:
     - cron: "17 3 * * 1"   # Mondays 03:17 UTC
   push:
     branches: [main]
-    paths: ["tools/fetch_manga.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
+    paths: ["tools/fetch_manga.py", "tools/fetch_manga_anilist.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
 
 permissions:
   contents: write
@@ -31,7 +37,13 @@ jobs:
       - name: Install build dependencies
         run: pip install --quiet numpy scipy scikit-learn
       - name: Download all manga from Jikan (about an hour)
+        id: jikan
+        if: ${{ github.event.inputs.source != 'anilist' }}
+        continue-on-error: true
         run: python tools/fetch_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
+      - name: Download from AniList instead (backup, about an hour)
+        if: ${{ github.event.inputs.source == 'anilist' || steps.jikan.outcome == 'failure' }}
+        run: python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
       - name: Build catalog and recommendations
         run: python tools/build_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz" data
       - name: Commit updated data

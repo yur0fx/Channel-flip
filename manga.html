@@ -428,7 +428,7 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
   </aside>
 </main>
 
-<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList.</b> The manga list is every manga, manhwa, manhua and light novel on <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a> (or MyAnimeList through the <a href="https://jikan.moe" target="_blank" rel="noopener">Jikan</a> API as a backup), downloaded weekly, with explicit adult titles and doujinshi left out. Titles that are also on MyAnimeList link there; the rest link to AniList. Scores marked "AVG SCORE" are AniList's average user rating, and "members" counts AniList users with the title on their list. "Describe a mood" matches your words against each title's genres, themes and story keywords; mention a title ("dark manhwa like Solo Leveling") to start from it. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.</p>
+<p class="note"><b>Channel Flip is a free fan project and is not affiliated with MyAnimeList.</b> The manga list is every manga, manhwa, manhua and light novel on <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>, downloaded weekly through its free API, with explicit adult titles and doujinshi left out. Titles that are also on MyAnimeList link there; the rest link to AniList. Scores marked "AVG SCORE" are AniList's average user rating, "members" counts AniList users with the title on their list, and synopses and covers load from AniList. "Describe a mood" matches your words against each title's genres, themes and story keywords; mention a title ("dark manhwa like Solo Leveling") to start from it. Reading time assumes about 5 minutes per chapter. Your loved, watchlist and read marks stay in this browser and are separate from the anime ones.</p>
 
 <div class="boot" id="boot" role="status"><div class="boot-in"><b>Tuning in…</b><span id="bootMsg">Loading the manga list</span></div></div>
 <script>
@@ -1077,11 +1077,10 @@ function loadSyn(a){
     if(SYN_CACHE.has(a.i)) return paint();
     if(state.current&&state.current.i!==a.i) return;
     try{
-      if(a.i<0){SYN_CACHE.set(a.i,null);paint();return;}
-      const r=await fetch("https://api.jikan.moe/v4/manga/"+a.i);
+      const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query:"query($id:Int,$mal:Int){Media(id:$id,idMal:$mal,type:MANGA){description(asHtml:false)}}",variables:a.i<0?{id:-a.i}:{mal:a.i}})});
       if(r.status===429){await new Promise(z=>setTimeout(z,1100));return loadSyn(a);}
       const j=r.ok?await r.json():null;
-      let s=(j&&j.data&&j.data.synopsis)||"";
+      let s=((j&&j.data&&j.data.Media&&j.data.Media.description)||"").replace(/<br\s*\/?>/gi,"\n");s=new DOMParser().parseFromString(s,"text/html").body.textContent||"";
       s=s.replace(/\s*\[Written by MAL Rewrite\]\s*$/,"").replace(/\s*\(Source:[^)]*\)\s*$/,"").trim();
       SYN_CACHE.set(a.i,s||null);
     }catch(e){SYN_CACHE.set(a.i,null);}

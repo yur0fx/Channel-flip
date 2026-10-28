@@ -3,7 +3,7 @@
 Entries linked to MyAnimeList keep their MAL id (the site links them to MyAnimeList); AniList-only entries get a
 negative id (-AniList id) and the site links them to AniList instead.
 
-Writes the same gzipped JSON-lines format as fetch_manga.py, so build_manga.py works with either source.
+Writes gzipped JSON lines in the field layout build_manga.py reads.
 AniList allows roughly 30-90 requests a minute; at 50 manga per request the full list takes about an hour.
 
 Usage: python tools/fetch_manga_anilist.py OUT.jsonl.gz [--max-pages N] [--url URL] [--delay SECONDS]
@@ -55,7 +55,7 @@ def post(url, page, tries=8):
     return None
 
 
-def to_jikan_shape(m):
+def to_row(m):
     """Map one AniList media object onto the fields build_manga.py reads."""
     fmt = m.get("format")
     ty = FORMAT.get(fmt) or (COUNTRY.get(m.get("countryOfOrigin"), "Manga") if fmt == "MANGA" else None)
@@ -90,7 +90,7 @@ def write(f, p, n, skipped):
         if m.get("isAdult"):
             skipped += 1
             continue
-        row = to_jikan_shape(m)
+        row = to_row(m)
         if row:
             f.write(json.dumps(row, ensure_ascii=False) + "\n"); n += 1
     return n, skipped

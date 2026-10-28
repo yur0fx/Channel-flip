@@ -8,7 +8,7 @@ It's a static site: two pages plus data files in `data/`. The manga data (`data/
 
 - Catalog, tags and relations: [anime-offline-database](https://github.com/manami-project/anime-offline-database) (ODbL 1.0 / DbCL 1.0). The derived files in `data/` are shared under the same license.
 - English titles, scores, member counts, studios and cover image paths: MyAnimeList, via [meesvandongen/anime-dataset](https://github.com/meesvandongen/anime-dataset).
-- Manga catalog: MyAnimeList via the [Jikan](https://jikan.moe) API, fetched weekly.
-- Synopses load live in the browser from the [Jikan](https://jikan.moe) API.
+- Manga catalog, tags, covers and synopses: [AniList](https://anilist.co) via its free GraphQL API, fetched weekly.
+- Anime synopses load live in the browser from the [Jikan](https://jikan.moe) API.
 
 Not affiliated with MyAnimeList.

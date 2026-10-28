@@ -1,4 +1,4 @@
-"""Turn the Jikan manga download into the compact files the site loads.
+"""Turn the AniList manga download (tools/fetch_manga_anilist.py) into the compact files the site loads.
 
 Writes data/manga.json (catalog) and data/manga-recs.json (8 "if you like this" picks per manga).
 Synopses are only used here to derive keywords and similarity; they are not published.

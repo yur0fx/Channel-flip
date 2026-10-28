@@ -568,7 +568,7 @@ function renderForYou(){
 }
 function updateCount(){
   const n=pool().length;
-  $("count").textContent=state.pool==="foryou"&&!state.loved.length&&!state.saved.length?"Tap ♡ Loved on a few shows to tune this channel":state.pool==="together"&&!state.friend.length?"Add your friend's favorites under Together":n?`${n.toLocaleString("en")} show${n===1?"":"s"} on the dial`:"No signal with these filters";
+  $("count").textContent=state.pool==="foryou"&&!state.loved.length&&!state.saved.length?"Tap ♡ Loved on a few shows to tune this channel":state.pool==="together"&&!state.friend.length?"Add your friend's favorites under Together":n?`${n.toLocaleString("en")} show${n===1?"":"s"} on the dial${state.pool==="all"&&n<DATA.length?` (filters hide ${(DATA.length-n).toLocaleString("en")})`:""}`:"No signal with these filters";
   $("flipBtn").disabled=!n;
 }
 

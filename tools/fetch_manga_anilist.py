@@ -24,9 +24,8 @@ QUERY = """query ($page: Int, $sort: [MediaSort]) {
       startDate { year }
       averageScore popularity genres
       tags { name rank category isMediaSpoiler isAdult }
-      staff(perPage: 6, sort: RELEVANCE) { edges { role node { name { full } } } }
+      staff(perPage: 4, sort: RELEVANCE) { edges { role node { name { full } } } }
       coverImage { large }
-      description(asHtml: false)
     }
   }
 }"""
@@ -76,7 +75,7 @@ def to_row(m):
             n = ((e.get("node") or {}).get("name") or {}).get("full")
             if n and n not in authors:
                 authors.append(n)
-    desc = re.sub(r"<[^>]+>", " ", m.get("description") or "")
+    desc = ""  # synopses load live on the page; leaving them out keeps each request light
     t = m.get("title") or {}
     return {
         "mal_id": m.get("idMal") or -m["id"], "title": t.get("romaji") or t.get("english"), "title_english": t.get("english"),

@@ -70,8 +70,13 @@ tok = lambda s: [w for w in re.findall(r"[a-z][a-z'-]{3,}", (s or "").lower()) i
 docs = [" ".join(tok(m.get("synopsis"))) for m in rows]
 kv = TfidfVectorizer(min_df=max(2, min(20, len(docs) // 400)), max_df=0.04 if len(docs) > 3000 else 0.5,
                      sublinear_tf=True, max_features=1500)
-KW = kv.fit_transform(docs)
-kw_vocab = list(kv.get_feature_names_out())
+try:
+    KW = kv.fit_transform(docs)
+    kw_vocab = list(kv.get_feature_names_out())
+except ValueError:  # no synopsis text in the download: rely on genres, tags and authors
+    from scipy.sparse import csr_matrix
+    KW = csr_matrix((len(docs), 1))
+    kw_vocab = []
 
 # tag vocabulary: MAL genres/themes (lowercase) first, then synopsis keywords
 theme_names = sorted({g["name"] for m in rows for key in ("genres", "themes", "demographics") for g in (m.get(key) or [])})

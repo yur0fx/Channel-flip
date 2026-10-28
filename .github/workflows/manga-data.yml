@@ -36,12 +36,15 @@ jobs:
           python-version: "3.12"
       - name: Install build dependencies
         run: pip install --quiet numpy scipy scikit-learn
-      - name: Download all manga from Jikan (about an hour)
+      - name: Download all manga from Jikan (1-2.5 hours)
         id: jikan
         if: ${{ github.event.inputs.source != 'anilist' }}
         continue-on-error: true
+        timeout-minutes: 150   # if Jikan is too slow, give up and let AniList finish within the job's time
+
         run: python tools/fetch_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
       - name: Download from AniList instead (backup, about an hour)
+        timeout-minutes: 120
         if: ${{ github.event.inputs.source == 'anilist' || steps.jikan.outcome == 'failure' }}
         run: python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
       - name: Build catalog and recommendations

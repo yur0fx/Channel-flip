@@ -1,15 +1,21 @@
 name: Update manga data
 
-# Downloads every manga on MyAnimeList from the free Jikan API, rebuilds data/manga.json and
+# Downloads every manga from AniList's free API (falling back to MyAnimeList via Jikan), rebuilds data/manga.json and
 # data/manga-recs.json, and commits them. Runs once a week, and can be started by hand from the
 # Actions tab ("Run workflow").
 on:
   workflow_dispatch:
+    inputs:
+      source:
+        description: "Where to download the manga list from"
+        type: choice
+        options: [anilist, jikan]
+        default: anilist
   schedule:
     - cron: "17 3 * * 1"   # Mondays 03:17 UTC
   push:
     branches: [main]
-    paths: ["tools/fetch_manga.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
+    paths: ["tools/fetch_manga.py", "tools/fetch_manga_anilist.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
 
 permissions:
   contents: write
@@ -30,7 +36,15 @@ jobs:
           python-version: "3.12"
       - name: Install build dependencies
         run: pip install --quiet numpy scipy scikit-learn
-      - name: Download all manga from Jikan (about an hour)
+      - name: Download all manga from AniList (about an hour)
+        id: anilist
+        if: ${{ github.event.inputs.source != 'jikan' }}
+        continue-on-error: true
+        timeout-minutes: 150
+        run: python tools/fetch_manga_anilist.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
+      - name: Download from MyAnimeList via Jikan instead (backup, 1-2.5 hours)
+        if: ${{ github.event.inputs.source == 'jikan' || steps.anilist.outcome == 'failure' }}
+        timeout-minutes: 140
         run: python tools/fetch_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
       - name: Build catalog and recommendations
         run: python tools/build_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz" data

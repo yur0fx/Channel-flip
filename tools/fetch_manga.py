@@ -46,6 +46,7 @@ def main():
                 f.write(json.dumps({k: m.get(k) for k in KEEP}, ensure_ascii=False) + "\n")
                 n += 1
         while page <= max_pages and (last is None or page <= last):
+            t0 = time.time()
             d = get(url(page))
             if d is None or "data" not in d:
                 failed.append(page); streak += 1
@@ -59,7 +60,7 @@ def main():
                 if page % 50 == 0 or page == last:
                     print(f"page {page}/{last}: {n} manga so far", flush=True)
             page += 1
-            time.sleep(delay)
+            time.sleep(max(0.0, delay - (time.time() - t0)))  # the request time counts toward Jikan's spacing
         still = []
         for p in failed:  # one more pass over pages that failed the first time
             time.sleep(max(delay, 2))

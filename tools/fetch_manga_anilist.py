@@ -1,4 +1,7 @@
-"""Backup source: download every manga that AniList links to a MyAnimeList entry, via AniList's free GraphQL API.
+"""Download every manga on AniList (~80,000, explicit titles excluded) via AniList's free GraphQL API.
+
+Entries linked to MyAnimeList keep their MAL id (the site links them to MyAnimeList); AniList-only entries get a
+negative id (-AniList id) and the site links them to AniList instead.
 
 Writes the same gzipped JSON-lines format as fetch_manga.py, so build_manga.py works with either source.
 AniList allows roughly 30-90 requests a minute; at 50 manga per request the full list takes about an hour.
@@ -71,7 +74,7 @@ def to_jikan_shape(m):
     desc = re.sub(r"<[^>]+>", " ", m.get("description") or "")
     t = m.get("title") or {}
     return {
-        "mal_id": m["idMal"], "title": t.get("romaji") or t.get("english"), "title_english": t.get("english"),
+        "mal_id": m.get("idMal") or -m["id"], "title": t.get("romaji") or t.get("english"), "title_english": t.get("english"),
         "title_japanese": t.get("native"), "type": ty, "chapters": m.get("chapters"), "volumes": m.get("volumes"),
         "status": STATUS.get(m.get("status")), "published": {"prop": {"from": {"year": (m.get("startDate") or {}).get("year")}}},
         "score": (m.get("averageScore") or 0) / 10 or None, "members": m.get("popularity") or 0,
@@ -84,7 +87,7 @@ def to_jikan_shape(m):
 
 def write(f, p, n, skipped):
     for m in p.get("media") or []:
-        if not m.get("idMal") or m.get("isAdult"):
+        if m.get("isAdult"):
             skipped += 1
             continue
         row = to_jikan_shape(m)
@@ -112,7 +115,7 @@ def main():
             streak = 0
             n, skipped = write(f, p, n, skipped)
             if page % 50 == 0:
-                print(f"page {page}: {n} manga kept, {skipped} skipped (no MAL link or adult)", flush=True)
+                print(f"page {page}: {n} manga kept, {skipped} explicit titles skipped", flush=True)
             if not (p.get("pageInfo") or {}).get("hasNextPage"):
                 break
             page += 1

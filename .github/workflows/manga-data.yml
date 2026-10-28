@@ -1,0 +1,49 @@
+name: Update manga data
+
+# Downloads every manga on MyAnimeList from the free Jikan API, rebuilds data/manga.json and
+# data/manga-recs.json, and commits them. Runs once a week, and can be started by hand from the
+# Actions tab ("Run workflow").
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"   # Mondays 03:17 UTC
+  push:
+    branches: [main]
+    paths: ["tools/fetch_manga.py", "tools/build_manga.py", ".github/workflows/manga-data.yml"]
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: manga-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: pip install --quiet numpy scipy scikit-learn
+      - name: Download all manga from Jikan (about an hour)
+        run: python tools/fetch_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz"
+      - name: Build catalog and recommendations
+        run: python tools/build_manga.py "$RUNNER_TEMP/manga-raw.jsonl.gz" data
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/manga.json data/manga-recs.json
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Update manga data from Jikan"
+          git push
+      - name: Rebuild GitHub Pages
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true

@@ -294,6 +294,12 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
 @keyframes blink{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.boot-in b{animation:none}}
 .note b{color:var(--phosphor);font-weight:500}
+.boot-in span a{color:var(--osd)}
+.sect{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:#00000040;border:1px solid var(--line);align-self:center}
+.sect a{font:600 12.5px var(--body);color:var(--dim);text-decoration:none;padding:4px 12px;border-radius:999px}
+.sect a:hover{color:var(--phosphor)}
+.sect a[aria-current="page"]{background:var(--tally);color:#fff}
+.sect a:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
 </head>
 <body>
@@ -302,6 +308,7 @@ body{margin:0}img{max-width:100%}[hidden]{display:none!important}
 <header class="top">
   <div class="brandline">
     <h1>Channel Flip<span>.</span></h1>
+    <nav class="sect" aria-label="Section"><a href="./" aria-current="page">Anime</a><a href="manga.html">Manga</a></nav>
     <p><span id="totalCount"></span> anime · <kbd>Space</kbd> to flip</p>
   </div>
   <div class="finder" id="finder">

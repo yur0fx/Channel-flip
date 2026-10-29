@@ -1,2 +1,2 @@
-finished 2026-10-28 11:02 UTC
-catalog 10547 titles (10043 in the popular core), 5499 fetched this run, 110 pages ok, 0 pages failed
+finished 2026-10-29 11:01 UTC
+catalog 10570 titles (10043 in the popular core), 5500 fetched this run, 110 pages ok, 0 pages failed

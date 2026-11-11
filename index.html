@@ -147,6 +147,14 @@ canvas#noise{position:absolute;inset:0;width:100%;height:100%;opacity:0;transiti
 .btn.mal:hover{background:#fff}
 .btn.saved{border-color:var(--amber);color:var(--amber)}
 .btn.loved{border-color:var(--tally);color:#ff8a80}
+.watch{display:flex;flex-wrap:wrap;align-items:center;gap:7px 8px;padding:10px 12px;border-radius:14px;background:#060b0c80;border:1px solid #ffc76033}
+.watch .wl{font:400 14px var(--pixel);color:var(--amber);margin-right:4px;text-shadow:0 0 8px #ffc76055}
+.watch .wwait{font-size:12.5px;color:var(--dim)}
+.svc{font:700 13px var(--body);color:var(--glass);background:var(--amber);text-decoration:none;padding:6px 12px;border-radius:9px;white-space:nowrap}
+.svc small{font-weight:500;font-size:11px;opacity:.75}
+.svc:hover{background:#ffd88a}
+.svc.jw{background:transparent;color:var(--amber);border:1px solid #ffc76066;font-weight:500}
+.svc.jw:hover{background:#ffc7601a}
 .empty{position:relative;z-index:2;margin:auto;text-align:center;padding:60px 24px;font-family:var(--pixel);color:var(--osd);font-size:24px;text-shadow:0 0 10px #8ff0cf88}
 .empty small{display:block;font-family:var(--body);color:var(--dim);font-size:14px;margin-top:8px;text-shadow:none}
 
@@ -644,6 +652,7 @@ function render(a){
         <button class="btn ${isLoved?"loved":""}" id="loveBtn" type="button" aria-pressed="${isLoved}">${isLoved?"♥ Loved":"♡ Loved"}</button>
         <button class="btn" id="seenBtn" type="button" title="Mark as seen and flip again">${isSeen?"✓ Seen":"Seen · next"}</button>
       </div>
+      ${SITE?`<div class="watch" id="watch" data-id="${a.i}">${watchHtml(a)}</div>`:""}
       ${recsHtml(a)}
     </div>`;
   setArt(a);
@@ -654,6 +663,7 @@ function render(a){
   $("loveBtn").onclick=()=>{toggle(state.loved,a.i);if(state.loved.includes(a.i)&&!state.seen.includes(a.i))state.seen.push(a.i);persist();render(a);renderLists();changed();};
   tv.querySelectorAll(".rec").forEach(b=>b.onclick=()=>tuneTo(+b.dataset.id));
   if(SITE&&!flipping) loadSyn(a);
+  if(SITE&&!flipping) loadWatch(a);
   if(!flipping) setHash(a);
   tv.querySelectorAll(".stlink").forEach(b=>b.onclick=()=>{toggleSet(state.studios,b.dataset.st);renderChips();changed();$("filtersBox").open=true;});
   tv.querySelectorAll("#tags button").forEach(b=>b.onclick=()=>{
@@ -1138,6 +1148,46 @@ function loadSyn(a){
     paint();
     await new Promise(z=>setTimeout(z,350));
   });
+}
+/* ---------- where to watch (or read) legally ----------
+   AniList only lists official services, so every link here is a legal one. Anime fall back to MyAnimeList's
+   streaming list (via Jikan), and always get a JustWatch search for what's available in the viewer's country. */
+const WATCH_KIND="ANIME";
+const WATCH_CACHE=new Map();
+const JW_PATH={NL:"nl/zoeken",BE:"be/zoeken",US:"us/search",GB:"uk/search",UK:"uk/search",CA:"ca/search",AU:"au/search",NZ:"nz/search",IE:"ie/search"};
+function jwUrl(a){
+  let c="";try{c=((navigator.language||"").split("-")[1]||"").toUpperCase();}catch(e){}
+  return "https://www.justwatch.com/"+(JW_PATH[c]||"us/search")+"?q="+encodeURIComponent(a.e||a.t);
+}
+function watchHtml(a){
+  const read=WATCH_KIND==="MANGA", got=WATCH_CACHE.get(a.i);
+  const head=`<span class="wl">${read?"Read it legally":"Watch it legally"}</span>`;
+  if(got===undefined) return head+`<span class="wwait">Finding official ${read?"sites":"streams"}…</span>`;
+  const links=got.map(l=>`<a class="svc" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.site)}${l.lang?` <small>${esc(l.lang)}</small>`:""} ↗</a>`).join("");
+  const jw=read?"":`<a class="svc jw" href="${jwUrl(a)}" target="_blank" rel="noopener" title="See which services carry it where you live">${got.length?"Other services in your country":"Check services in your country"} ↗</a>`;
+  if(!got.length&&read) return head+`<span class="wwait">No official ${read?"reading site":"stream"} listed yet.</span>`;
+  return head+links+jw;
+}
+async function loadWatch(a){
+  const paint=()=>{const el=$("watch");if(el&&+el.dataset.id===a.i)el.innerHTML=watchHtml(a);};
+  if(WATCH_CACHE.has(a.i)) return paint();
+  const keep=new Map();
+  const add=(site,url,lang)=>{if(!url||!/^https:\/\//.test(url))return;const k=site.toLowerCase()+(lang||"");if(!keep.has(k))keep.set(k,{site,url,lang:lang&&lang!=="English"?lang:""});};
+  try{
+    const q=`query($id:Int,$mal:Int,$t:MediaType){Media(id:$id,idMal:$mal,type:$t){externalLinks{site url type language isDisabled}}}`;
+    const v=WATCH_KIND==="MANGA"?(a.i<0?{id:-a.i,t:"MANGA"}:{mal:a.i,t:"MANGA"}):{mal:a.i,t:"ANIME"};
+    const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query:q,variables:v})});
+    const j=r.ok?await r.json():null;
+    const links=((j&&j.data&&j.data.Media&&j.data.Media.externalLinks)||[]).filter(l=>!l.isDisabled);
+    const ok=WATCH_KIND==="MANGA"?links.filter(l=>l.type==="STREAMING"||(l.type==="INFO"&&!/wikipedia|official site|twitter|x\.com/i.test(l.site))):links.filter(l=>l.type==="STREAMING");
+    ok.sort((x,y)=>(!x.language||x.language==="English"?0:1)-(!y.language||y.language==="English"?0:1));
+    ok.forEach(l=>add(l.site,l.url,l.language));
+  }catch(e){}
+  if(!keep.size&&WATCH_KIND==="ANIME"){
+    try{const r=await fetch("https://api.jikan.moe/v4/anime/"+a.i+"/streaming");const j=r.ok?await r.json():null;((j&&j.data)||[]).forEach(l=>add(l.name,l.url,""));}catch(e){}
+  }
+  WATCH_CACHE.set(a.i,[...keep.values()].slice(0,6));
+  paint();
 }
 function setHash(a){try{const h="#anime-"+a.i;if(location.hash!==h)history.replaceState(null,"",h);}catch(e){}}
 function hashId(){const m=(location.hash||"").match(/^#anime-(\d+)$/);return m&&BY_ID.has(+m[1])?+m[1]:0;}

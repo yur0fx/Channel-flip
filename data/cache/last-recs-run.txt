@@ -1,3 +1,3 @@
-finished 2026-11-25 14:58 UTC
-manga pages 221 | manga fetched 11039 | anime pages 246 | anime fetched 12041
-anime cached 12070 | manga cached 11101
+finished 2026-11-26 14:23 UTC
+manga pages 221 | manga fetched 11036 | anime pages 246 | anime fetched 12042
+anime cached 12070 | manga cached 11103
